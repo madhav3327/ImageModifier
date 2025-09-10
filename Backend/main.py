@@ -18,15 +18,42 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 app = FastAPI(title="Vision Backend (REST)")
 
-ALLOWED_ORIGINS = [os.getenv("CORS_ORIGINS", "")]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def build_allowed_origins() -> list[str]:
+    raw = os.getenv("CORS_ORIGINS", "")
+    # Support single or comma-separated, strip spaces and trailing slashes
+    items = [
+        o.strip().rstrip("/")
+        for o in raw.split(",")
+        if o.strip()
+    ]
+    # Fast fail if you accidentally passed a plain string
+    if any("," in o for o in items):
+        print("[CORS] Warning: found a comma inside an origin; check CORS_ORIGINS formatting")
+    return items
+
+ALLOWED_ORIGINS = build_allowed_origins()
+
+# Temporary switch: make CORS fully open to confirm plumbing (then tighten back)
+DEBUG_CORS = os.getenv("DEBUG_CORS", "false").lower() == "true"
+if DEBUG_CORS:
+    print("[CORS] DEBUG MODE: allowing all origins (no credentials)")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    print("[CORS] Allowed origins:", ALLOWED_ORIGINS)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_credentials=True,      # ok with explicit origins
+        allow_methods=["*"],         # includes OPTIONS for preflight
+        allow_headers=["*"],         # includes Content-Type, etc.
+    )
 
 # ------------ Models ------------
 class EditIn(BaseModel):
@@ -57,6 +84,13 @@ def to_data_b64(content: bytes) -> str:
 def ping():
     return {"ok": True}
 
+
+@app.get("/healthz")
+def healthz():
+    return {
+        "allowed_origins": ALLOWED_ORIGINS,
+        "debug_cors": DEBUG_CORS,
+    }
 @app.post("/api/edit", response_model=EditOut)
 def api_edit(in_: EditIn):
     prompt = (in_.prompt or "").strip()
