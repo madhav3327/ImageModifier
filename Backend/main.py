@@ -18,10 +18,7 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 app = FastAPI(title="Vision Backend (REST)")
 
-ALLOWED_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
-ALLOWED_ORIGINS = [o.strip() for o in ALLOWED_ORIGINS.split(",") if o.strip()]
-print("CORS_ORIGINS env:", os.getenv("CORS_ORIGINS"))
-print("Allowed origins list:", ALLOWED_ORIGINS)
+ALLOWED_ORIGINS = [os.getenv("CORS_ORIGINS", "")]
 
 app.add_middleware(
     CORSMiddleware,
