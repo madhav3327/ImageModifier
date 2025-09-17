@@ -4,3 +4,11 @@ python-multipart==0.0.9
 pydantic==2.9.2
 requests==2.32.3
 openai==1.52.2
+python-dotenv
+pillow
+google-genai>=0.3.0
+fastapi
+python-dotenv
+google-generativeai
+Pillow
+uvicorn

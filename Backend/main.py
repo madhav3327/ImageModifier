@@ -1,47 +1,49 @@
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException,WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
+from fastapi.middleware.cors import CORSMiddleware
+from google import genai
+from PIL import Image
+from io import BytesIO
 import os
-import base64
+from dotenv import load_dotenv
+from typing import Literal, Tuple, Dict
+import asyncio
 import uuid
 import tempfile
 import traceback
-from typing import Literal, Tuple
-
-import requests
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+# Load environment variables (e.g., your Gemini API key)
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+# --- RECOMMENDED API KEY CONFIGURATION ---
+# Create a Client instance, which will handle authentication.
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-app = FastAPI(title="Vision Backend (REST)")
+app = FastAPI()
 
-
+# ---------------- CORS ----------------
 def build_allowed_origins() -> list[str]:
     raw = os.getenv("CORS_ORIGINS", "")
-    # Support single or comma-separated, strip spaces and trailing slashes
-    items = [
-        o.strip().rstrip("/")
-        for o in raw.split(",")
-        if o.strip()
-    ]
-    # Fast fail if you accidentally passed a plain string
+    items = [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
     if any("," in o for o in items):
         print("[CORS] Warning: found a comma inside an origin; check CORS_ORIGINS formatting")
     return items
 
-ALLOWED_ORIGINS = build_allowed_origins()
+# Fallback to localhost dev ports if env not set
+ALLOWED_ORIGINS = build_allowed_origins() or [
+    "http://localhost:5173",  # tablet
+    "http://localhost:5174",  # kiosk
+]
 
-# Temporary switch: make CORS fully open to confirm plumbing (then tighten back)
 DEBUG_CORS = os.getenv("DEBUG_CORS", "false").lower() == "true"
+
 if DEBUG_CORS:
     print("[CORS] DEBUG MODE: allowing all origins (no credentials)")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=False,
+        allow_credentials=False,   # must be False when using "*"
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -50,174 +52,179 @@ else:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=ALLOWED_ORIGINS,
-        allow_credentials=True,      # ok with explicit origins
-        allow_methods=["*"],         # includes OPTIONS for preflight
-        allow_headers=["*"],         # includes Content-Type, etc.
+        allow_credentials=True,    # allowed with explicit origins
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
+@app.post("/api/edit")
 
-# ------------ Models ------------
-class EditIn(BaseModel):
-    provider: Literal["gpt", "gemini"]   # "gemini" = Banana
-    prompt: str
-    image_data_url: str                  # ALWAYS required (image-to-image)
+async def process_image_with_gemini(
+    image_file: UploadFile = File(...),
+    prompt: str = Form(...)
+):
+    print("into gemini")
+    try:
+        image_bytes = await image_file.read()
+        pil_image = Image.open(BytesIO(image_bytes))
 
-class EditOut(BaseModel):
-    mime: str
-    image_b64: str
+        contents = [prompt, pil_image]
+        print("**********************",prompt)
 
-# ------------ Helpers ------------
-def decode_data_url(data_url: str) -> Tuple[str, bytes]:
-    """
-    Decode data URL like 'data:image/png;base64,AAAA...' -> (mime, bytes)
-    """
-    if not data_url.startswith("data:"):
-        raise ValueError("image_data_url must be a data URL")
-    header, b64 = data_url.split(",", 1)
-    mime = header.split(";")[0].split(":")[1] if ":" in header else "image/png"
-    return mime, base64.b64decode(b64)
+        # Use the client to access the models service
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-image-preview", 
+            contents=contents,
+        )
+        print("after gemini")
 
-def to_data_b64(content: bytes) -> str:
-    return base64.b64encode(content).decode("utf-8")
 
-# ------------ Routes ------------
+        result_image_data = None
+        for part in response.candidates[0].content.parts:
+            if part.inline_data is not None:
+                pil_image = Image.open(BytesIO(part.inline_data.data))
+                
+                # Create an in-memory buffer (BytesIO)
+                img_byte_arr = BytesIO()
+                pil_image.save(img_byte_arr, format="PNG")
+                img_byte_arr.seek(0)
+
+                return Response(content=img_byte_arr.getvalue(), media_type="image/png")
+        
+        raise HTTPException(status_code=500, detail="No image found in Gemini API response.")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+       
+
+# ---------------- WebSockets: Pairing & Relay ----------------
+import asyncio
+import uuid
+from typing import Dict, Optional
+from fastapi import WebSocket, WebSocketDisconnect
+
+# rooms[sessionId] = {"kiosk": WebSocket|None, "tablet": WebSocket|None}
+rooms: Dict[str, Dict[str, Optional[WebSocket]]] = {}
 @app.get("/ping")
-def ping():
-    return {"ok": True}
+def check():
+    return "checked"
 
+@app.post("/session")
+def create_session():
+    """
+    Create a short session code (e.g. 'A1B2C3') to pair kiosk & tablet.
+    Tablet reads it from kiosk screen and connects.
+    """
+    sid = uuid.uuid4().hex[:6].upper()
+    rooms[sid] = {"kiosk": None, "tablet": None}
+    print(f"[session] created {sid}")
+    return {"sessionId": sid}
 
-@app.get("/healthz")
-def healthz():
-    return {
-        "allowed_origins": ALLOWED_ORIGINS,
-        "debug_cors": DEBUG_CORS,
-    }
-@app.post("/api/edit", response_model=EditOut)
-def api_edit(in_: EditIn):
-    prompt = (in_.prompt or "").strip()
-    if not prompt:
-        raise HTTPException(400, "prompt is required")
-    if not in_.image_data_url:
-        raise HTTPException(400, "image_data_url is required")
+@app.websocket("/ws")
+async def ws_endpoint(ws: WebSocket, session: str, role: str):
+    """
+    Connect with:  ws://.../ws?session=ABC123&role=kiosk|tablet
+    - Exactly one kiosk and one tablet per session.
+    - Any JSON message received is relayed to the opposite peer as-is.
+    - Server also emits:
+        {type:"CONNECTED", role}
+        {type:"PEER_STATUS", role:"kiosk|tablet", status:"online|offline"}
+        {type:"ERROR", message:"..."} on basic validation failures
+    """
+    # Accept first so we can send structured errors back if needed
+    await ws.accept()
+    print(f"[WS] incoming: session={session} role={role}")
 
-    mime, img_bytes = decode_data_url(in_.image_data_url)
-    print(f"[edit] provider={in_.provider} prompt_len={len(prompt)} img_bytes={len(img_bytes)} mime={mime}")
+    # Basic validation
+    if session not in rooms:
+        await _safe_send(ws, {"type": "ERROR", "message": "Invalid session"})
+        await ws.close(code=4000)
+        return
+    if role not in ("kiosk", "tablet"):
+        await _safe_send(ws, {"type": "ERROR", "message": "Invalid role"})
+        await ws.close(code=4001)
+        return
+    if rooms[session][role] is not None:
+        await _safe_send(ws, {"type": "ERROR", "message": f"{role} already connected"})
+        await ws.close(code=4002)
+        return
 
-    if in_.provider == "gpt":
-        # ---- OpenAI: REST /v1/images/edits with multipart/form-data ----
-        if not OPENAI_API_KEY:
-            raise HTTPException(500, "OPENAI_API_KEY not configured")
+    # Register
+    rooms[session][role] = ws
+    await _safe_send(ws, {"type": "CONNECTED", "role": role})
+    await _broadcast(session, {"type": "PEER_STATUS", "role": role, "status": "online"})
 
-        tmp_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4().hex}.png")
-        with open(tmp_path, "wb") as f:
-            f.write(img_bytes)
-        print(f"[edit:gpt] saved → {tmp_path}")
+    # Optional heartbeat to keep some proxies from idling out
+    heartbeat_task = asyncio.create_task(_heartbeat(ws))
 
-        try:
-            with open(tmp_path, "rb") as f:
-                files = {
-                    "image": ("selfie.png", f, "image/png"),
-                }
-                data = {
-                    "model": "gpt-image-1",
-                    "prompt": prompt,
-                    "size": "1024x1024",
-                }
-                headers = {
-                    "Authorization": f"Bearer {OPENAI_API_KEY}",
-                }
-                r = requests.post(
-                    "https://api.openai.com/v1/images/edits",
-                    headers=headers,
-                    data=data,
-                    files=files,
-                    timeout=120,
-                )
+    try:
+        while True:
+            # Any JSON payload is simply relayed to the other peer
+            msg = await ws.receive_json()
+            target = "kiosk" if role == "tablet" else "tablet"
 
-            if r.status_code != 200:
-                raise HTTPException(502, f"OpenAI edit HTTP {r.status_code}: {r.text}")
+            # small guard: ensure target exists before relaying
+            peer = rooms.get(session, {}).get(target)
+            if peer is None:
+                # still ACK locally so caller can react (e.g., show “kiosk offline”)
+                await _safe_send(ws, {
+                    "type": "ERROR",
+                    "message": f"{target} not connected"
+                })
+                continue
 
-            j = r.json()
-            item = (j.get("data") or [{}])[0]
+            await _safe_send(peer, msg)
 
-            if "b64_json" in item:
-                return EditOut(mime="image/png", image_b64=item["b64_json"])
+    except WebSocketDisconnect:
+        print(f"[WS] disconnect: session={session} role={role}")
+    except Exception as e:
+        print(f"[WS] error ({role}): {e}")
+    finally:
+        heartbeat_task.cancel()
+        await _cleanup_ws(session, role, ws)
 
-            if "url" in item:
-                img = requests.get(item["url"], timeout=60)
-                img.raise_for_status()
-                return EditOut(
-                    mime=img.headers.get("Content-Type", "image/png"),
-                    image_b64=to_data_b64(img.content),
-                )
+async def _safe_send(ws: WebSocket, data: dict):
+    try:
+        await ws.send_json(data)
+    except Exception:
+        pass
 
-            raise HTTPException(502, f"OpenAI edit returned no image: {j}")
+async def _broadcast(session: str, payload: dict):
+    for peer in rooms.get(session, {}).values():
+        if peer is not None:
+            try:
+                await peer.send_json(payload)
+            except Exception:
+                # ignore send errors; cleanup happens elsewhere
+                pass
 
-        except HTTPException:
-            raise
-        except Exception as e:
-            traceback.print_exc()
-            raise HTTPException(502, f"OpenAI edit error: {e}")
-        finally:
-            # Always cleanup
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-                print(f"[edit:gpt] cleaned → {tmp_path}")
+async def _cleanup_ws(session: str, role: str, ws: WebSocket):
+    # Remove this role if it’s the same socket
+    try:
+        if rooms.get(session, {}).get(role) is ws:
+            rooms[session][role] = None
+    except Exception:
+        pass
 
-    elif in_.provider == "gemini":
-        # ---- Gemini Banana: gemini-2.5-flash-image-preview via REST ----
-        if not GOOGLE_API_KEY:
-            raise HTTPException(500, "GOOGLE_API_KEY not configured")
+    # Tell the other side we went offline
+    await _broadcast(session, {"type": "PEER_STATUS", "role": role, "status": "offline"})
 
-        try:
-            url = (
-                "https://generativelanguage.googleapis.com/"
-                "v1beta/models/gemini-2.5-flash-image-preview:generateContent"
-                f"?key={GOOGLE_API_KEY}"
-            )
-            payload = {
-                "contents": [
-                    {
-                        "role": "user",
-                        "parts": [
-                            {
-                                "inline_data": {
-                                    "mime_type": mime,
-                                    "data": to_data_b64(img_bytes),
-                                }
-                            },
-                            {"text": prompt},
-                        ],
-                    }
-                ]
-            }
+    # If both sides are gone, delete the room
+    try:
+        entry = rooms.get(session)
+        if entry and entry["kiosk"] is None and entry["tablet"] is None:
+            rooms.pop(session, None)
+            print(f"[session] removed empty {session}")
+    except Exception:
+        pass
 
-            r = requests.post(url, json=payload, timeout=120)
-            if r.status_code != 200:
-                raise HTTPException(502, f"Gemini error {r.status_code}: {r.text}")
-
-            j = r.json()
-            out_b64, out_mime = None, "image/png"
-
-            for cand in j.get("candidates", []):
-                for part in cand.get("content", {}).get("parts", []):
-                    if "inline_data" in part:
-                        inline = part["inline_data"]
-                        out_b64 = inline.get("data")
-                        out_mime = inline.get("mime_type", out_mime)
-                        break
-                if out_b64:
-                    break
-
-            if not out_b64:
-                raise HTTPException(502, f"Gemini did not return an image: {j}")
-
-            return EditOut(mime=out_mime, image_b64=out_b64)
-
-        except HTTPException:
-            raise
-        except Exception as e:
-            traceback.print_exc()
-            raise HTTPException(502, f"Gemini edit error: {e}")
-
-    else:
-        raise HTTPException(400, "Unsupported provider")
+async def _heartbeat(ws: WebSocket, interval: float = 25.0):
+    """
+    Best-effort keepalive; some hosts/proxies close idle WS after ~30s.
+    This sends a trivial JSON ping periodically.
+    """
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            await _safe_send(ws, {"type": "PING", "ts": asyncio.get_event_loop().time()})
+    except Exception:
+        pass
