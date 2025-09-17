@@ -26,36 +26,41 @@ app = FastAPI()
 def build_allowed_origins() -> list[str]:
     raw = os.getenv("CORS_ORIGINS", "")
     items = [o.strip().rstrip("/") for o in raw.split(",") if o.strip()]
-    if any("," in o for o in items):
-        print("[CORS] Warning: found a comma inside an origin; check CORS_ORIGINS formatting")
     return items
 
-# Fallback to localhost dev ports if env not set
-ALLOWED_ORIGINS = build_allowed_origins() or [
-    "http://localhost:5173",  # tablet
-    "http://localhost:5174",  # kiosk
-]
-
+ALLOWED_ORIGINS = build_allowed_origins()
+ALLOW_RENDER_REGEX = os.getenv("CORS_ALLOW_RENDER_REGEX", "false").lower() == "true"
 DEBUG_CORS = os.getenv("DEBUG_CORS", "false").lower() == "true"
 
 if DEBUG_CORS:
-    print("[CORS] DEBUG MODE: allowing all origins (no credentials)")
+    print("[CORS] DEBUG: allow * (no credentials)")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_credentials=False,   # must be False when using "*"
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 else:
-    print("[CORS] Allowed origins:", ALLOWED_ORIGINS)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=ALLOWED_ORIGINS,
-        allow_credentials=True,    # allowed with explicit origins
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    if ALLOW_RENDER_REGEX:
+        print("[CORS] Using regex for *.onrender.com plus explicit origins:", ALLOWED_ORIGINS)
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=ALLOWED_ORIGINS,   # explicit frontends you know
+            allow_origin_regex=r"^https://.*\.onrender\.com$",  # any render frontend
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    else:
+        print("[CORS] Allowed origins:", ALLOWED_ORIGINS)
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=ALLOWED_ORIGINS,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 @app.post("/api/edit")
 
 async def process_image_with_gemini(
