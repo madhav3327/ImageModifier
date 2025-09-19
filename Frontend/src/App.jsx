@@ -2,97 +2,11 @@ import React, { useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { PlugZap, Activity, Settings2 } from "lucide-react";
 
-// --- Placeholder Components to resolve import errors ---
+import WelcomeScreen from "./components/WelcomeScreen";
+import ConsentScreen from "./components/ConsentScreen";
+import MainEditor from "./components/MainEditor";
 
-const WelcomeScreen = ({ onNext, onUserDataChange }) => {
-    const [name, setName] = useState("");
-    const [age, setAge] = useState("");
-
-    const handleNext = () => {
-        onUserDataChange({ name, age });
-        onNext();
-    };
-    
-    return (
-        <div className="flex flex-col items-center justify-center min-h-[calc(100vh-60px)] p-4">
-            <div className="w-full max-w-xl mx-auto p-8 rounded-2xl backdrop-blur-xl bg-white/5 border border-white/10 shadow-lg text-center">
-                <h1 className="text-4xl font-bold mb-2">Welcome</h1>
-                <p className="text-lg opacity-70 mb-8">Please enter your details to begin.</p>
-                <div className="grid gap-4 mb-6 text-left">
-                    <input
-                        type="text"
-                        placeholder="Your Name"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        className="w-full px-4 py-3 rounded-lg bg-slate-800/80 border border-white/10 outline-none focus:ring-2 focus:ring-emerald-500/50"
-                    />
-                    <input
-                        type="number"
-                        placeholder="Your Age"
-                        value={age}
-                        onChange={(e) => setAge(e.target.value)}
-                        className="w-full px-4 py-3 rounded-lg bg-slate-800/80 border border-white/10 outline-none focus:ring-2 focus:ring-emerald-500/50"
-                    />
-                </div>
-                <button onClick={handleNext} className="w-full px-8 py-4 rounded-xl text-lg font-bold bg-indigo-600 hover:bg-indigo-500 transition">
-                    Next
-                </button>
-            </div>
-        </div>
-    );
-};
-
-const ConsentScreen = ({ onConsent }) => (
-    <div className="flex flex-col items-center justify-center min-h-[calc(100vh-60px)] p-4">
-        <div className="w-full max-w-xl mx-auto p-8 rounded-2xl backdrop-blur-xl bg-white/5 border border-white/10 shadow-lg text-center">
-            <h1 className="text-4xl font-bold mb-2">Consent</h1>
-            <p className="text-lg opacity-70 mb-8">Please review and provide consent to continue.</p>
-            <p className="text-sm opacity-60 mb-8 text-left">
-                This is a placeholder for your consent form text. You would typically detail what data is being collected and how it will be used.
-            </p>
-            <div className="flex gap-4">
-                <button onClick={() => onConsent(false)} className="w-full px-8 py-4 rounded-xl text-lg font-bold bg-red-600/80 hover:bg-red-600 transition">
-                    Decline
-                </button>
-                <button onClick={() => onConsent(true)} className="w-full px-8 py-4 rounded-xl text-lg font-bold bg-emerald-600 hover:bg-emerald-500 transition">
-                    Accept
-                </button>
-            </div>
-        </div>
-    </div>
-);
-
-const MainEditor = ({ sendWS, wsConnected, username, onExit, canSend, resultUrl, onSetCanSend, onSetResultUrl }) => (
-    <div className="flex flex-col items-center justify-center min-h-[calc(100vh-60px)] p-4">
-        <div className="w-full max-w-xl mx-auto p-8 rounded-2xl backdrop-blur-xl bg-white/5 border border-white/10 shadow-lg text-center">
-            <h1 className="text-3xl font-bold mb-2">Main Editor</h1>
-            <p className="text-lg opacity-70 mb-8">Welcome, {username || "Guest"}!</p>
-            {resultUrl ? (
-                <div className="mb-4">
-                    <h3 className="text-xl font-semibold mb-2">Result:</h3>
-                    <img src={resultUrl} alt="Result from Kiosk" className="rounded-lg border border-white/10 max-w-full h-auto mx-auto"/>
-                     <button onClick={() => onSetResultUrl("")} className="mt-4 px-6 py-2 rounded-lg text-sm font-bold bg-indigo-600 hover:bg-indigo-500 transition">
-                        Clear Result
-                    </button>
-                </div>
-            ) : (
-                <button 
-                    onClick={() => sendWS({ type: "GENERATE", data: { username } })} 
-                    disabled={!canSend}
-                    className="w-full px-8 py-4 rounded-xl text-lg font-bold bg-sky-600 hover:bg-sky-500 transition disabled:bg-slate-700 disabled:cursor-not-allowed"
-                >
-                    {canSend ? "Send to Kiosk" : "Waiting for Kiosk..."}
-                </button>
-            )}
-            <button onClick={onExit} className="mt-4 w-full px-8 py-2 rounded-xl text-md font-bold bg-slate-700 hover:bg-slate-600 transition">
-                Exit
-            </button>
-        </div>
-    </div>
-);
-
-
-const RAW_BASE = "http://localhost:8000";
+const RAW_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 const WS_BASE = RAW_BASE.replace(/^http/i, "ws");
 
 function safeParse(s) {
@@ -103,6 +17,8 @@ function safeParse(s) {
   }
 }
 
+// ✅ FIX: The ConnectionScreen component is now defined outside the App component.
+// It receives all the data it needs (like sessionCode, error, and functions) as props.
 const ConnectionScreen = ({ sessionCode, setSessionCode, connectWS, error }) => (
   <div className="relative min-h-screen w-full flex items-center justify-center">
     <div className="relative z-10 w-full max-w-xl mx-auto p-8 rounded-2xl backdrop-blur-xl bg-white/5 border border-white/10 shadow-lg text-center">
@@ -134,6 +50,7 @@ const ConnectionScreen = ({ sessionCode, setSessionCode, connectWS, error }) => 
   </div>
 );
 
+
 export default function App() {
   const wsRef = useRef(null);
   const [sessionCode, setSessionCode] = useState("");
@@ -144,26 +61,23 @@ export default function App() {
   const [userData, setUserData] = useState({ name: "", age: "" });
   const [consentGiven, setConsentGiven] = useState(false);
   
+  // --- NEW STATE for synchronization ---
   const [canSend, setCanSend] = useState(false);
   const [resultUrl, setResultUrl] = useState("");
 
   const handleNextStep = () => setUserStep((prev) => prev + 1);
   const handleUserDataChange = (data) => setUserData(data);
   const handleConsent = (permission) => {
-    if (permission) {
-        setConsentGiven(true);
-        handleNextStep();
-    } else {
-        handleExit(); // If consent is declined, exit the flow
-    }
+    setConsentGiven(permission);
+    handleNextStep();
   };
 
   const handleExit = () => {
     setUserStep(1);
     setUserData({ name: "", age: "" });
     setConsentGiven(false);
-    setResultUrl("");
-    setCanSend(false);
+    // You may also want to close the WebSocket connection here
+    // try { wsRef.current?.close(); } catch {}
   };
 
   const connectWS = () => {
@@ -183,7 +97,6 @@ export default function App() {
       ws.onclose = () => {
         setWsConnected(false);
         setKioskStatus("offline");
-        setError("Connection closed. Please check the session code and network.");
       };
       ws.onerror = () => {
         setError("WebSocket error. Check network or session code.");
@@ -195,13 +108,16 @@ export default function App() {
         if (msg.type === "PEER_STATUS" && msg.role === "kiosk") {
             setKioskStatus(msg.status);
         }
+        // --- NEW: Listen for 'CAPTURED' and 'RESULT' messages ---
         if (msg.type === "CAPTURED") {
             setCanSend(true);
         }
         if (msg.type === "RESULT" && msg.dataUrl) {
             setResultUrl(msg.dataUrl);
-            setCanSend(false);
+            // We can also reset canSend here if needed for the next capture
+            // setCanSend(false);
         }
+        // --- END NEW ---
       };
       wsRef.current = ws;
     } catch {
@@ -236,10 +152,11 @@ export default function App() {
             wsConnected={wsConnected}
             username={userData.name}
             onExit={handleExit}
+            // --- NEW: Pass down the new state and result URL ---
             canSend={canSend}
             resultUrl={resultUrl}
-            onSetCanSend={setCanSend}
-            onSetResultUrl={setResultUrl}
+            onSetCanSend={setCanSend} // Pass the setter function
+            onSetResultUrl={setResultUrl} // Pass the setter function
           />
         );
       default:
@@ -256,7 +173,7 @@ export default function App() {
             <span
                 className={`text-[11px] px-2 py-1 rounded border ${
                   kioskStatus === "online"
-                    ? "bg-emerald-500/10 border-emerald-500 text-emerald-300"
+                    ? "bg-emerald-500/10 border-emerald-500"
                     : "bg-red-500/15 border-red-500/40 text-red-200"
                 }`}
                 title="Kiosk status"
@@ -268,15 +185,15 @@ export default function App() {
           </div>
         </div>
       </header>
-      {wsConnected ? renderUserFlow() :
-        <ConnectionScreen
-            sessionCode={sessionCode}
-            setSessionCode={setSessionCode}
-            connectWS={connectWS}
-            error={error}
+      {wsConnected ? renderUserFlow() : (
+        // ✅ FIX: Pass the required state and functions as props to the component.
+        <ConnectionScreen 
+          sessionCode={sessionCode}
+          setSessionCode={setSessionCode}
+          connectWS={connectWS}
+          error={error}
         />
-      }
+      )}
     </div>
   );
 }
-
