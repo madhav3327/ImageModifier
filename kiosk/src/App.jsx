@@ -5,20 +5,18 @@ import {
   Activity,
   PlugZap,
   Image as ImageIcon,
-  Zap,
-  Loader2,
 } from "lucide-react";
-import PulsingOrb from "./components/PulsingOrb";
+import TitleDisplay from "./components/TitleDisplay";
+import ProcessingDisplay from "./components/ProcessingDisplay";
 
 const RAW_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 const BACKEND_URL = RAW_BASE.replace(/\/+$/, "");
 const WS_BASE = BACKEND_URL.replace(/^http/i, "ws");
 
-// ------------------- Countdown Overlay -------------------
 function CountdownOverlay({ value }) {
   if (!value || value <= 0) return null;
   return (
-    <div className="absolute inset-0 flex items-center justify-center">
+    <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
       <motion.div
         key={value}
         initial={{ scale: 0.6, opacity: 0 }}
@@ -37,8 +35,8 @@ export default function App() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const wsRef = useRef(null);
-
   const capturedUrlRef = useRef(null);
+
   const [sessionId, setSessionId] = useState("");
   const [connected, setConnected] = useState(false);
   const [tabletOnline, setTabletOnline] = useState(false);
@@ -49,19 +47,30 @@ export default function App() {
   const [countdown, setCountdown] = useState(0);
 
   useEffect(() => {
+    if (stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.play();
+    }
+  }, [stream]);
+
+  const stopCamera = () => {
+    try {
+      if (videoRef.current) {
+        videoRef.current.pause?.();
+        videoRef.current.srcObject = null;
+      }
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      setStream(null);
+    } catch {}
+  };
+
+  useEffect(() => {
     createSession();
     return () => {
       try { wsRef.current?.close(); } catch {}
       try { stopCamera(); } catch {}
     };
   }, []);
-
-  useEffect(() => {
-    if (stream && videoRef.current) {
-      videoRef.current.srcObject = stream;
-      videoRef.current.play();
-    }
-  }, [stream]);
 
   const createSession = async () => {
     try {
@@ -74,174 +83,133 @@ export default function App() {
     }
   };
 
-  const connectWS = (sid) => {
-    try {
-      const ws = new WebSocket(
-        `${WS_BASE}/ws?session=${encodeURIComponent(sid)}&role=kiosk`
-      );
-      ws.onopen = () => setConnected(true);
-      ws.onclose = () => setConnected(false);
-      ws.onerror = () => setConnected(false);
-      ws.onmessage = async (ev) => {
-        const msg = safeParse(ev.data);
-        if (!msg || !msg.type) return;
-
-        switch (msg.type) {
-          case "PEER_STATUS":
-            if (msg.role === "tablet") setTabletOnline(msg.status === "online");
-            break;
-
-          case "OPEN_CAMERA":
-            await openCamera();
-            break;
-
-          case "CLOSE_CAMERA":
-            stopCamera();
-            break;
-
-          case "SHUTTER":
-            runCountdown(
-              typeof msg.countdown === "number" ? msg.countdown : 3,
-              async () => {
-                const dataUrl = await captureStill();
-                
-                capturedUrlRef.current = dataUrl;
-                setShowCapturedImage(true);
-                stopCamera();
-                
-                sendWS({ type: "CAPTURED" });
-              }
-            );
-            break;
-
-          case "EDIT_START":
-            setRendering(true);
-            setResultUrl("");
-            break;
-
-          case "EDIT": {
-            console.log("[KIOSK] EDIT received:", msg);
-            
-            if (!capturedUrlRef.current) {
-              console.error("[KIOSK] No captured image; capture first.");
-              setRendering(false);
-              sendWS({
-                type: "ERROR",
-                message: "No captured image available.",
-              });
-              break;
-            }
-            if (!msg.prompt || !msg.prompt.trim()) {
-              console.error("[KIOSK] Missing prompt.");
-              setRendering(false);
-              sendWS({ type: "ERROR", message: "No prompt provided." });
-              break;
-            }
-
-            setRendering(true);
-            setResultUrl("");
-
-            try {
-              const imgBlob = await (await fetch(capturedUrlRef.current)).blob();
-              const form = new FormData();
-              form.append("image_file", imgBlob, "capture.png");
-              form.append("prompt", msg.prompt.trim());
-
-              console.log("[KIOSK] POST →", `${BACKEND_URL}/api/edit`, {
-                promptLen: msg.prompt.length,
-                blobSize: imgBlob.size,
-              });
-
-              const response = await fetch(`${BACKEND_URL}/api/edit`, {
-                method: "POST",
-                body: form,
-              });
-
-              console.log(
-                "[KIOSK] /api/edit status:",
-                response.status,
-                response.statusText
-              );
-
-              if (!response.ok) {
-                const errorText = await response
-                  .text()
-                  .catch(() => "<no body>");
-                console.error("[KIOSK] Backend error:", errorText);
-                throw new Error(
-                  `Backend error (${response.status}): ${errorText}`
-                );
-              }
-
-              const ct = response.headers.get("content-type") || "";
-              if (ct.startsWith("image/")) {
-                const blob = await response.blob();
-                const objectUrl = URL.createObjectURL(blob);
-                console.log("[KIOSK] Received image blob; URL:", objectUrl);
-                setResultUrl(objectUrl);
-                setRendering(false);
-                sendWS({ type: "RESULT", dataUrl: objectUrl });
-              } else {
-                const result = await response.json();
-                const dataUrl = `data:${result.mime};base64,${result.image_b64}`;
-                console.log(
-                  "[KIOSK] Received JSON image; dataUrl length:",
-                  dataUrl.length
-                );
-                setResultUrl(dataUrl);
-                setRendering(false);
-                sendWS({ type: "RESULT", dataUrl });
-              }
-            } catch (err) {
-              console.error("[KIOSK] EDIT failed:", err);
-              setRendering(false);
-              sendWS({ type: "ERROR", message: err.message || String(err) });
-            }
-            break;
-          }
-
-          case "RESULT":
-            setRendering(false);
-            if (msg.dataUrl) setResultUrl(msg.dataUrl);
-            break;
-
-          default:
-            break;
-        }
-      };
-      wsRef.current = ws;
-    } catch (e) {
-      console.error("WS connect error", e);
-    }
-  };
-
   const sendWS = (obj) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+  };
+
+  const handleRefineRequest = async (prompt) => {
+    if (!resultUrl) {
+      console.error("No result image to refine.");
+      return;
+    }
+    console.log(resultUrl)
+    alert(resultUrl)
+    
+    capturedUrlRef.current = resultUrl; 
+    setRendering(true);
+    
+    try {
+      const imgBlob = await (await fetch(resultUrl)).blob();
+      const form = new FormData();
+      form.append("image_file", imgBlob, "refine.png");
+      form.append("prompt", prompt.trim());
+      
+      const response = await fetch(`${BACKEND_URL}/api/edit`, { method: "POST", body: form });
+      if (!response.ok) throw new Error("Backend error during refine");
+      
+      const blob = await response.blob();
+      const newObjectUrl = URL.createObjectURL(blob);
+      setResultUrl(newObjectUrl);
+      sendWS({ type: "RESULT", dataUrl: newObjectUrl });
+    } catch (err) {
+      console.error("REFINE failed:", err);
+      setRendering(false);
+    }
+  };
+
+  const connectWS = (sid) => {
+    const ws = new WebSocket(`${WS_BASE}/ws?session=${encodeURIComponent(sid)}&role=kiosk`);
+    ws.onopen = () => setConnected(true);
+    ws.onclose = () => setConnected(false);
+    ws.onerror = () => setConnected(false);
+    ws.onmessage = async (ev) => {
+      const msg = safeParse(ev.data);
+      if (!msg || !msg.type) return;
+
+      switch (msg.type) {
+        case "PEER_STATUS":
+          if (msg.role === "tablet") setTabletOnline(msg.status === "online");
+          break;
+        case "OPEN_CAMERA":
+          setShowCapturedImage(false);
+          setResultUrl("");
+          setRendering(false);
+          await openCamera();
+          break;
+        case "CLOSE_CAMERA":
+          stopCamera();
+          break;
+        case "SHUTTER":
+          runCountdown(
+            typeof msg.countdown === "number" ? msg.countdown : 3,
+            async () => {
+              const dataUrl = await captureStill();
+              capturedUrlRef.current = dataUrl;
+              setShowCapturedImage(true);
+              stopCamera();
+              sendWS({ type: "CAPTURED" });
+            }
+          );
+          break;
+        case "EDIT_START":
+          setRendering(true);
+          setResultUrl("");
+          break;
+        case "EDIT": {
+          if (!capturedUrlRef.current) {
+            console.error("No captured image available");
+            break;
+          }
+          setRendering(true);
+          setResultUrl("");
+          try {
+            const imgBlob = await (await fetch(capturedUrlRef.current)).blob();
+            const form = new FormData();
+            form.append("image_file", imgBlob, "capture.png");
+            form.append("prompt", msg.prompt.trim());
+            const response = await fetch(`${BACKEND_URL}/api/edit`, { method: "POST", body: form });
+            if (!response.ok) throw new Error("Backend error");
+            const blob = await response.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            console.log(objectUrl)
+            setResultUrl(objectUrl);
+           
+            sendWS({ type: "RESULT", dataUrl: objectUrl });
+          } catch (err) {
+            console.error("EDIT failed:", err);
+            setRendering(false);
+          }
+          break;
+        }
+        case "REFINE": {
+          await handleRefineRequest(msg.prompt);
+          break;
+        }
+        case "RESULT":
+          if (msg.dataUrl) setResultUrl(msg.dataUrl);
+          break;
+        default:
+          break;
+      }
+    };
+    wsRef.current = ws;
   };
 
   const openCamera = async () => {
     if (stream) return;
     try {
       const s = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
+        video: { 
+          facingMode: "user",
+          aspectRatio: 12 / 16,
+        },
         audio: false,
       });
       setStream(s);
     } catch (e) {
       console.error("Could not open camera", e);
     }
-  };
-
-  const stopCamera = () => {
-    try {
-      if (videoRef.current) {
-        videoRef.current.pause?.();
-        videoRef.current.srcObject = null;
-      }
-      if (stream) stream.getTracks().forEach((t) => t.stop());
-      setStream(null);
-    } catch {}
   };
 
   const runCountdown = (secs, onDone) => {
@@ -256,7 +224,7 @@ export default function App() {
       }
     }, 1000);
   };
-
+  
   const captureStill = async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -270,34 +238,43 @@ export default function App() {
     return canvas.toDataURL("image/png");
   };
 
+  const renderContent = () => {
+    if (rendering) {
+      return (
+        <ProcessingDisplay
+          capturedImageUrl={capturedUrlRef.current}
+          resultUrl={resultUrl}
+          onAnimationComplete={() => setRendering(false)}
+        />
+      );
+    }
+    if (resultUrl && !rendering) {
+      return <img src={resultUrl} alt="Result" className="w-full h-full object-cover" />;
+    }
+    if (stream) {
+      return <video ref={videoRef} playsInline autoPlay muted className="w-full h-full object-cover" />;
+    }
+    if (showCapturedImage && capturedUrlRef.current) {
+      return <img src={capturedUrlRef.current} alt="Captured" className="w-full h-full object-cover" />;
+    }
+    return <div className="text-center px-6 opacity-80"><p className="text-sm">Waiting for tablet to start...</p></div>;
+  };
+
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-950 via-slate-900 to-black text-slate-100">
       <header className="sticky top-0 z-10 backdrop-blur bg-slate-900/50 border-b border-white/10">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
           <Camera className="w-6 h-6" />
           <h1 className="text-lg font-semibold tracking-tight">Vision Kiosk</h1>
-
           <div className="ml-auto flex items-center gap-2 text-xs">
             <div className="px-2 py-1 rounded border border-white/10 bg-white/5">
               Session: <b>{sessionId || "…"}</b>
             </div>
-            <div
-              className={`px-2 py-1 rounded border ${
-                connected
-                  ? "border-emerald-500 bg-emerald-500/10"
-                  : "border-white/10 bg-white/5"
-              }`}
-            >
+            <div className={`px-2 py-1 rounded border ${connected ? "border-emerald-500 bg-emerald-500/10" : "border-white/10 bg-white/5"}`}>
               <PlugZap className="w-3 h-3 inline -mt-0.5 mr-1" />
               {connected ? "WS connected" : "WS offline"}
             </div>
-            <div
-              className={`px-2 py-1 rounded border ${
-                tabletOnline
-                  ? "border-indigo-500 bg-indigo-500/10"
-                  : "border-white/10 bg-white/5"
-              }`}
-            >
+            <div className={`px-2 py-1 rounded border ${tabletOnline ? "border-indigo-500 bg-indigo-500/10" : "border-white/10 bg-white/5"}`}>
               <Activity className="w-3 h-3 inline -mt-0.5 mr-1" />
               Tablet: {tabletOnline ? "online" : "offline"}
             </div>
@@ -305,96 +282,17 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 pb-16 pt-6 grid gap-6">
-        <div className="rounded-2xl border border-white/10 bg-slate-900/50 overflow-hidden shadow-xl">
+      <main className="max-w-6xl w-full mx-auto px-4 pb-16 pt-6 flex flex-col items-center gap-6">
+        <TitleDisplay />
+        <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900/50 overflow-hidden shadow-xl">
           <div className="p-3 border-b border-white/10 flex items-center gap-2">
             <ImageIcon className="w-5 h-5" />
-            <span className="font-medium">Captured</span>
-            <span className="ml-auto text-xs opacity-70">
-              {stream
-                ? "Live preview (awaiting capture…)"
-                : showCapturedImage
-                ? "Frozen still"
-                : "Waiting…"}
-            </span>
+            <span className="font-medium">Kiosk Display</span>
           </div>
-
-          <div className="relative aspect-[16/9] bg-black flex items-center justify-center">
-            {stream && (
-              <video
-                ref={videoRef}
-                playsInline
-                autoPlay
-                muted
-                className="w-full h-full object-contain"
-              />
-            )}
-
-            {!stream && showCapturedImage && capturedUrlRef.current && (
-              <img
-                src={capturedUrlRef.current}
-                alt="Captured"
-                className="w-full h-full object-contain"
-              />
-            )}
-
-            {!stream && !showCapturedImage && (
-              <div className="text-center px-6 opacity-80">
-                <p className="text-sm">
-                  Waiting for tablet to open the camera and take a shot…
-                </p>
-              </div>
-            )}
-
+          <div className="relative aspect-[12/16] bg-black flex items-center justify-center">
+            {renderContent()}
             <AnimatePresence>
               {countdown > 0 && <CountdownOverlay value={countdown} />}
-            </AnimatePresence>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-white/10 bg-slate-900/50 overflow-hidden shadow-xl">
-          <div className="p-3 border-b border-white/10 flex items-center gap-2">
-            <ImageIcon className="w-5 h-5" />
-            <span className="font-medium">Styled Result</span>
-            <span className="ml-auto text-xs opacity-70">
-              {rendering ? "Generating…" : resultUrl ? "Ready" : "Idle"}
-            </span>
-          </div>
-
-          <div className="relative aspect-[16/9] bg-slate-950 flex items-center justify-center">
-            <AnimatePresence mode="wait">
-              {rendering ? (
-                <motion.div
-                  key="anim"
-                  initial={{ opacity: 0.0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.35 }}
-                  className="absolute inset-0"
-                >
-                  <PulsingOrb />
-                </motion.div>
-              ) : resultUrl ? (
-                <motion.img
-                  key="result"
-                  src={resultUrl}
-                  alt="Result"
-                  className="max-w-full max-h-full object-contain"
-                  initial={{ opacity: 0, scale: 0.98 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.35 }}
-                />
-              ) : (
-                <motion.div
-                  key="idle"
-                  className="text-center px-6 opacity-80 text-sm"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                >
-                  Once the tablet sends a prompt, the neural animation will
-                  appear here and the styled image will follow.
-                </motion.div>
-              )}
             </AnimatePresence>
           </div>
         </div>

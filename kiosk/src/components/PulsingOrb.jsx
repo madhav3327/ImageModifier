@@ -40,42 +40,37 @@ export default function PulsingOrb() {
   const particles = Array.from({ length: 20 }, (_, i) => i);
   
   return (
-    <div className="relative w-full h-full overflow-hidden flex items-center justify-center bg-slate-950">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05),transparent_70%)]" />
+    <div className="w-full h-full flex flex-col items-center justify-center bg-slate-950">
+      {/* Container for the animation */}
+      <div className="relative w-[200px] h-[200px] flex items-center justify-center">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05),transparent_70%)]" />
 
-      <motion.div
-        className="w-[120px] h-[120px] rounded-full bg-indigo-500/80 blur-lg"
-        variants={coreVariants}
-        animate="animate"
-      />
-      
-      <motion.div
-        className="absolute w-full h-full flex items-center justify-center"
-        variants={containerVariants}
-        animate="animate"
-      >
-        {particles.map((i) => (
-          <motion.div
-            key={i}
-            className="absolute w-2 h-2 rounded-full bg-indigo-300 opacity-0"
-            variants={particleVariants}
-            custom={i}
-          />
-        ))}
-      </motion.div>
-
-      <div className="absolute bottom-6 text-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-white/5 backdrop-blur">
-          <motion.span
-            animate={{ rotate: 360 }}
-            transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-            className="w-4 h-4 rounded-full border-2 border-t-transparent border-white"
-          />
-          <span className="text-sm tracking-wide">
-            Generating your result...
-          </span>
-        </div>
+        <motion.div
+          className="w-[120px] h-[120px] rounded-full bg-indigo-500/80 blur-lg"
+          variants={coreVariants}
+          animate="animate"
+        />
+        
+        <motion.div
+          className="absolute w-full h-full flex items-center justify-center"
+          variants={containerVariants}
+          animate="animate"
+        >
+          {particles.map((i) => (
+            <motion.div
+              key={i}
+              className="absolute w-2 h-2 rounded-full bg-indigo-300 opacity-0"
+              variants={particleVariants}
+              custom={i}
+            />
+          ))}
+        </motion.div>
       </div>
+
+      {/* Paragraph added below */}
+      <p className="mt-4 text-sm text-slate-400 font-light tracking-wider">
+        Use the controller to start
+      </p>
     </div>
   );
 }
