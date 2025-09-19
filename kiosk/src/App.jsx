@@ -9,6 +9,7 @@ import {
 import TitleDisplay from "./components/TitleDisplay";
 import ProcessingDisplay from "./components/ProcessingDisplay";
 import PulsingOrb from "./components/PulsingOrb"; 
+import FloatingIconsFooter from "./components/FloatingIconsFooter";
 
 const RAW_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 const BACKEND_URL = RAW_BASE.replace(/\/+$/, "");
@@ -315,6 +316,7 @@ export default function App() {
             </AnimatePresence>
           </div>
         </div>
+        <FloatingIconsFooter/>
       </main>
 
       <canvas ref={canvasRef} className="hidden" />
