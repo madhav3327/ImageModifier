@@ -8,10 +8,12 @@ import {
 } from "lucide-react";
 import TitleDisplay from "./components/TitleDisplay";
 import ProcessingDisplay from "./components/ProcessingDisplay";
+import PulsingOrb from "./components/PulsingOrb"; 
 
 const RAW_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 const BACKEND_URL = RAW_BASE.replace(/\/+$/, "");
 const WS_BASE = BACKEND_URL.replace(/^http/i, "ws");
+
 
 function CountdownOverlay({ value }) {
   if (!value || value <= 0) return null;
@@ -52,6 +54,10 @@ export default function App() {
       videoRef.current.play();
     }
   }, [stream]);
+  const resultUrlRef = useRef(resultUrl);
+  useEffect(() => {
+    resultUrlRef.current = resultUrl;
+  }, [resultUrl]);
 
   const stopCamera = () => {
     try {
@@ -89,18 +95,19 @@ export default function App() {
   };
 
   const handleRefineRequest = async (prompt) => {
-    if (!resultUrl) {
+    // --- FIX: Read the URL from the ref to get the latest value ---
+    const currentResultUrl = resultUrlRef.current;
+    
+    if (!currentResultUrl) {
       console.error("No result image to refine.");
+      setRendering(false);
       return;
     }
-    console.log(resultUrl)
-    alert(resultUrl)
     
-    capturedUrlRef.current = resultUrl; 
     setRendering(true);
     
     try {
-      const imgBlob = await (await fetch(resultUrl)).blob();
+      const imgBlob = await (await fetch(currentResultUrl)).blob();
       const form = new FormData();
       form.append("image_file", imgBlob, "refine.png");
       form.append("prompt", prompt.trim());
@@ -110,14 +117,14 @@ export default function App() {
       
       const blob = await response.blob();
       const newObjectUrl = URL.createObjectURL(blob);
-      setResultUrl(newObjectUrl);
+      setResultUrl(newObjectUrl); // This will trigger the useEffect to update the ref
       sendWS({ type: "RESULT", dataUrl: newObjectUrl });
     } catch (err) {
       console.error("REFINE failed:", err);
+    } finally {
       setRendering(false);
     }
   };
-
   const connectWS = (sid) => {
     const ws = new WebSocket(`${WS_BASE}/ws?session=${encodeURIComponent(sid)}&role=kiosk`);
     ws.onopen = () => setConnected(true);
@@ -134,6 +141,7 @@ export default function App() {
         case "OPEN_CAMERA":
           setShowCapturedImage(false);
           setResultUrl("");
+          // alert("2")
           setRendering(false);
           await openCamera();
           break;
@@ -163,6 +171,7 @@ export default function App() {
           }
           setRendering(true);
           setResultUrl("");
+          // alert("1")
           try {
             const imgBlob = await (await fetch(capturedUrlRef.current)).blob();
             const form = new FormData();
@@ -257,7 +266,17 @@ export default function App() {
     if (showCapturedImage && capturedUrlRef.current) {
       return <img src={capturedUrlRef.current} alt="Captured" className="w-full h-full object-cover" />;
     }
-    return <div className="text-center px-6 opacity-80"><p className="text-sm">Waiting for tablet to start...</p></div>;
+    return (
+    <motion.div
+      key="idle-animation"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+      className="w-full h-full"
+    >
+      <PulsingOrb />
+    </motion.div>
+  );
   };
 
   return (
