@@ -71,6 +71,7 @@ async def process_image_with_gemini(
     try:
         image_bytes = await image_file.read()
         pil_image = Image.open(BytesIO(image_bytes))
+        prompt= "Maintain the subject's face and facial identity. Change the background of the image as per the following prompt: " + prompt
 
         contents = [prompt, pil_image]
         print("**********************",prompt)
