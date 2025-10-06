@@ -71,7 +71,30 @@ async def process_image_with_gemini(
     try:
         image_bytes = await image_file.read()
         pil_image = Image.open(BytesIO(image_bytes))
-        prompt= "Maintain the subject's face and facial identity. Change the background of the image as per the following prompt: " + prompt
+        # prompt= "Maintain the subject's face and facial identity. generate a single page comic by generating a story line according to this prompt : " + prompt
+        prompt = f"""
+Generate a visually cohesive, single-page comic strip, divided into 4 distinct, sequential panels with a clear border around the entire page.
+
+**Overall Artistic Direction and Theme:** {prompt}.
+
+**Main Character Identity:** The main character depicted in every panel must consistently maintain the face and facial identity of the provided reference image (or a detailed description if no image is provided).
+
+**Comic Narrative Requirements:**
+- The comic should tell a short, coherent story based on the theme derived from the "Overall Artistic Direction and Theme."
+- Each of the 4 panels must contain a distinct scene.
+- Each panel must have a short, legible text caption or speech bubble embedded directly within the image, which advances the story sequentially from panel 1 to panel 4.
+
+**Panel Progression Guidance:**
+- **Panel 1:** Introduce the character in the setting, hinting at the beginning of the story or an initial action.
+- **Panel 2:** Develop the narrative, showing an ongoing action or a new development.
+- **Panel 3:** Illustrate a key moment, challenge, or achievement in the story.
+- **Panel 4:** Conclude the story, showing the outcome, reflection, or resolution.
+
+**Formatting and Style:**
+- Maintain a consistent artistic style as specified in the "Overall Artistic Direction and Theme" throughout all panels.
+- Ensure all embedded text is clear, readable, and naturally integrated into the comic art.
+- The entire comic should fit on a single page, clearly delineating each panel.
+"""
 
         contents = [prompt, pil_image]
         print("**********************",prompt)
