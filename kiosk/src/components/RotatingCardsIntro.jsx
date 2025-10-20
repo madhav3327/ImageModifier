@@ -1,123 +1,147 @@
 // RotatingCardsIntro.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-/**
- * Props:
- *  - images: string[]
- *  - onGo?: () => void
- *  - ctaLabel?: string
- *  - consentText?: string
- *  - intervalMs?: number
- */
 export default function RotatingCardsIntro({
   images = [],
-  onGo,
-  ctaLabel,
-  consentText = `The images generated are by google nano banana and
-we will use your images for our other projects.`,
-  intervalMs = 2000,
+  intervalMs = 200000,
+  videoFor,
+  onStoryline,
+  onPortrait,
 }) {
   const ringRef = useRef(null);
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const timerRef = useRef(null);
 
-  const [consented, setConsented] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(null); // overlay index (null = closed)
+  const [frontIdx, setFrontIdx] = useState(0);      // for cosmetic rotation only
+  const [spinning, setSpinning] = useState(false);  // debounce just for smooth spin
+  const overlayOpen = activeIdx !== null;
 
   const cards = useMemo(() => {
     if (images.length) return images.map((src) => ({ type: "img", src }));
-    return [
-      "radial-gradient(80% 60% at 30% 20%, #7dd3fc, #1e3a8a)",
-      "radial-gradient(60% 80% at 70% 30%, #c4b5fd, #4c1d95)",
-      "radial-gradient(65% 70% at 40% 40%, #fda4af, #7f1d1d)",
-      "radial-gradient(70% 70% at 60% 50%, #86efac, #064e3b)",
-      "radial-gradient(75% 75% at 50% 40%, #fde68a, #78350f)",
-      "radial-gradient(80% 60% at 40% 60%, #a5f3fc, #164e63)",
-      "radial-gradient(60% 80% at 30% 60%, #f0abfc, #701a75)",
-      "radial-gradient(80% 80% at 50% 50%, #93c5fd, #1e3a8a)",
-    ].map((bg) => ({ type: "bg", bg }));
+    return DEFAULT_BACKGROUNDS.map((bg) => ({ type: "bg", bg }));
   }, [images]);
 
   const N = Math.max(1, cards.length);
   const step = 360 / N;
 
+  // Position cards around the ring once
   useEffect(() => {
     const ring = ringRef.current;
     if (!ring) return;
     const items = Array.from(ring.children);
     items.forEach((el, i) => {
       el.style.transform = `rotateY(${i * step}deg) translateZ(var(--z-depth))`;
+      el.style.pointerEvents = "auto"; // every card is always clickable
     });
-  }, [N, step, cards.length]);
+  }, [step, N, cards.length]);
 
+  // Auto-rotate (does NOT disable clicks)
   useEffect(() => {
     const ring = ringRef.current;
     if (!ring) return;
 
     let index = 0;
-    ring.style.transform =
-      "translateZ(-100px) rotateX(-8deg) rotateY(0deg)";
-    setFront(index);
+    ring.style.transform = "translateZ(-100px) rotateX(-8deg) rotateY(0deg)";
+    markFront(index);
 
-    timerRef.current = setInterval(() => {
+    const id = setInterval(() => {
+      if (overlayOpen) return; // pause while overlay is up
       index = (index + 1) % N;
-      ring.style.transform = `translateZ(-100px) rotateX(-8deg) rotateY(${
-        -index * step
-      }deg)`;
-      setFront(index);
+      ring.style.transform =
+        `translateZ(-100px) rotateX(-8deg) rotateY(${-index * step}deg)`;
+      markFront(index);
     }, Math.max(500, intervalMs));
 
-    return () => clearInterval(timerRef.current);
+    return () => clearInterval(id);
 
-    function setFront(idx) {
+    function markFront(idx) {
       const items = Array.from(ring.children);
-      items.forEach((el, i) =>
-        el.classList.toggle("rcg-front", i === idx)
-      );
-    }
-  }, [N, step, intervalMs]);
-
-  const openCamera = async () => {
-    if (onGo) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: false,
+      items.forEach((el, i) => {
+        const isFront = i === idx;
+        el.classList.toggle("rcg-front", isFront);
       });
-      streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
-      const cam = document.querySelector(".rcg-camera");
-      if (cam) cam.style.display = "block";
-    } catch (err) {
-      alert("Could not access camera: " + (err?.message || String(err)));
+      setFrontIdx(idx);
     }
-  };
-  const closeCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) videoRef.current.srcObject = null;
-    const cam = document.querySelector(".rcg-camera");
-    if (cam) cam.style.display = "none";
-  };
-  useEffect(() => () => closeCamera(), []);
+  }, [N, step, intervalMs, overlayOpen]);
 
-  const handleCTA = () => {
-    if (!consented) return;
-    onGo ? onGo() : openCamera();
+  // Rotate helper (used by buttons and card clicks)
+  const rotateToIndex = (idx) => {
+    const ring = ringRef.current;
+    if (!ring) return;
+    setSpinning(true);
+    setFrontIdx(idx);
+    ring.style.transition = "transform 500ms cubic-bezier(.22,.61,.36,1)";
+    requestAnimationFrame(() => {
+      ring.style.transform =
+        `translateZ(-100px) rotateX(-8deg) rotateY(${-idx * step}deg)`;
+    });
+    setTimeout(() => {
+      ring.style.transition = "";
+      setSpinning(false);
+    }, 520);
   };
-  const label = ctaLabel || (onGo ? "Let’s go" : "Open Camera");
+
+  const goPrev = () => rotateToIndex((frontIdx - 1 + N) % N);
+  const goNext = () => rotateToIndex((frontIdx + 1) % N);
+
+  // Clicking ANY card: rotate to that card (cosmetic), then open overlay.
+  const focusCard = (idx) => {
+    const ring = ringRef.current;
+    if (!ring) return;
+
+    setSpinning(true);
+    setFrontIdx(idx);
+    ring.style.transition = "transform 600ms cubic-bezier(.22,.61,.36,1)";
+    requestAnimationFrame(() => {
+      ring.style.transform =
+        `translateZ(-100px) rotateX(-8deg) rotateY(${-idx * step}deg)`;
+    });
+
+    setTimeout(() => {
+      ring.style.transition = "";
+      setSpinning(false);
+      setActiveIdx(idx);
+    }, 620);
+  };
+
+  const getStyleName = (idx) => {
+    const c = cards[idx];
+    if (!c) return `Style ${idx + 1}`;
+    if (c.type === "img" && typeof c.src === "string") {
+      const base = c.src.split("/").pop() || `style-${idx + 1}`;
+      return humanize(base.replace(/\.[a-z0-9]+$/i, ""));
+    }
+    return `Style ${idx + 1}`;
+  };
+
+  const handleStoryline = () => {
+    if (activeIdx == null) return;
+    const payload = { index: activeIdx, name: getStyleName(activeIdx) };
+    onStoryline ? onStoryline(payload) : alert(`Storyline with: ${payload.name}`);
+  };
+
+  const handlePortrait = () => {
+    if (activeIdx == null) return;
+    const payload = { index: activeIdx, name: getStyleName(activeIdx) };
+    onPortrait ? onPortrait(payload) : alert(`Portrait with: ${payload.name}`);
+  };
+
+  const resolvedVideo =
+    activeIdx != null && typeof videoFor === "function" ? videoFor(activeIdx) : null;
+
+  // Lock background scroll while overlay is open
+  useEffect(() => {
+    if (!overlayOpen) return;
+    const prev = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    return () => (document.documentElement.style.overflow = prev);
+  }, [overlayOpen]);
 
   return (
-    <main className="rcg-app" aria-label="3D card gallery with camera consent">
-      {/* Heading + aurora */}
+    <main className="rcg-app" aria-label="3D card gallery">
       <header className="rcg-header">
         <h1 className="rcg-title">
-          <span>Welcome</span>
-          <br />
-          <span>to</span>
-          <br />
+          <span>Welcome</span><br />
+          <span>to</span><br />
           <span>Art Exhibit</span>
           <div className="aurora" aria-hidden="true">
             <div className="aurora__item" />
@@ -127,76 +151,114 @@ we will use your images for our other projects.`,
           </div>
         </h1>
         <p className="rcg-subtitle">
-          Now a days we have camera to capture every beautiful moment but earlier
-          we have these beautiful paints which we will recreate using AI today
+          Discover different artists and choose a painting style to transform your portrait or story into art.
         </p>
       </header>
 
-      {/* 3D stage */}
-      <section className="rcg-stage">
+      <section className="rcg-stage" aria-label="rotating gallery">
+        {/* Left/Right navigation */}
+        <button className="rcg-nav rcg-nav--left" onClick={goPrev} aria-label="Previous">‹</button>
+
         <div className="rcg-ring" ref={ringRef}>
           {cards.map((c, i) => (
-            <div key={i} className="rcg-card">
+            <button
+              key={i}
+              type="button"
+              className="rcg-card"
+              aria-label={`Open ${getStyleName(i)} preview`}
+              onClick={() => focusCard(i)}
+            >
               <div
                 className="rcg-inner"
-                style={
-                  c.type === "bg" ? { backgroundImage: c.bg } : undefined
-                }
+                style={c.type === "bg" ? { backgroundImage: c.bg } : undefined}
               >
                 {c.type === "img" && (
                   <img src={c.src} alt={`card ${i + 1}`} loading="eager" />
                 )}
-                <div className="label" />
+                <div className="label">{getStyleName(i)}</div>
               </div>
-            </div>
+            </button>
           ))}
         </div>
+
+        <button className="rcg-nav rcg-nav--right" onClick={goNext} aria-label="Next">›</button>
       </section>
 
-      {/* Controls */}
-      <section className="rcg-controls">
-        <div className="rcg-cta">
-          <button
-            className="rcg-btn"
-            onClick={handleCTA}
-            disabled={!consented}
-            aria-disabled={!consented}
-          >
-            {label}
-          </button>
+      {overlayOpen && (
+        <div
+          className="rcg-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${getStyleName(activeIdx)} preview`}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setActiveIdx(null);
+          }}
+        >
+          <div className="rcg-overlay__panel">
+            <header className="rcg-overlay__head">
+              <div className="rcg-overlay__title">{getStyleName(activeIdx)}</div>
+              <button
+                className="rcg-overlay__close"
+                onClick={() => setActiveIdx(null)}
+                aria-label="Close preview"
+              >
+                ✕
+              </button>
+            </header>
+
+            <div className="rcg-overlay__media">
+              {resolvedVideo ? (
+                <video
+                  src={resolvedVideo}
+                  className="rcg-overlay__video"
+                  autoPlay
+                  controls
+                  playsInline
+                />
+              ) : (
+                <div className="rcg-overlay__placeholder">
+                  <div className="rcg-overlay__pulse" />
+                  <span>No video mapped for this style.</span>
+                </div>
+              )}
+            </div>
+
+            <div className="rcg-overlay__actions">
+              <button className="rcg-btn" onClick={handleStoryline}>Storyline in this style</button>
+              <button className="rcg-btn" onClick={handlePortrait}>Portrait in this style</button>
+            </div>
+          </div>
         </div>
-        <label className="rcg-consent">
-          <input
-            type="checkbox"
-            checked={consented}
-            onChange={(e) => setConsented(e.target.checked)}
-          />
-          <span>
-            {consentText.split("\n").map((ln, idx) => (
-              <React.Fragment key={idx}>
-                {ln}
-                <br />
-              </React.Fragment>
-            ))}
-          </span>
-        </label>
-        <div className="rcg-hint">Check the box to enable “{label}”.</div>
-      </section>
-
-      {/* Camera panel (only when onGo not supplied) */}
-      {!onGo && (
-        <section className="rcg-camera" aria-live="polite">
-          <header>
-            <strong>Camera Preview</strong>
-            <button type="button" onClick={closeCamera} aria-label="Close camera">
-              Close
-            </button>
-          </header>
-          <video ref={videoRef} playsInline autoPlay muted />
-        </section>
       )}
 
-      <style>{`
+      <style>{CSS}</style>
+    </main>
+  );
+}
+
+/* ---------------- helpers ---------------- */
+
+const DEFAULT_BACKGROUNDS = [
+  "radial-gradient(80% 60% at 30% 20%, #7dd3fc, #1e3a8a)",
+  "radial-gradient(60% 80% at 70% 30%, #c4b5fd, #4c1d95)",
+  "radial-gradient(65% 70% at 40% 40%, #fda4af, #7f1d1d)",
+  "radial-gradient(70% 70% at 60% 50%, #86efac, #064e3b)",
+  "radial-gradient(75% 75% at 50% 40%, #fde68a, #78350f)",
+  "radial-gradient(80% 60% at 40% 60%, #a5f3fc, #164e3c)",
+  "radial-gradient(60% 80% at 30% 60%, #f0abfc, #701a75)",
+  "radial-gradient(80% 80% at 50% 50%, #93c5fd, #1e3a8a)",
+];
+
+function humanize(s) {
+  return s
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+/* ---------------- CSS ---------------- */
+
+const CSS = `
 :root{
   --bg: #0b0f17;
   --ink: #e8f0ff;
@@ -216,7 +278,7 @@ we will use your images for our other projects.`,
   color:var(--ink);
   font-family: Inter, system-ui, Segoe UI, Roboto, Arial, sans-serif;
   display:grid;
-  grid-template-rows: auto auto auto;
+  grid-template-rows: auto auto 1fr;
   gap:18px;
   padding:24px;
 }
@@ -241,23 +303,28 @@ we will use your images for our other projects.`,
 .aurora__item:nth-of-type(2){ background:#ffc640; right:0; top:0; animation: aurora-border 6s ease-in-out infinite, aurora-2 12s ease-in-out infinite alternate; }
 .aurora__item:nth-of-type(3){ background:#33ff8c; left:0; bottom:0; animation: aurora-border 6s ease-in-out infinite, aurora-3 8s ease-in-out infinite alternate; }
 .aurora__item:nth-of-type(4){ background:#e54cff; right:0; bottom:-50%; animation: aurora-border 6s ease-in-out infinite, aurora-4 24s ease-in-out infinite alternate; }
-@keyframes aurora-1{0%{top:0;right:0;}50%{top:100%;right:75%;}75%{top:100%;right:25%;}100%{top:0;right:0;}}
-@keyframes aurora-2{0%{top:-50%;left:0%;}60%{top:100%;left:75%;}85%{top:100%;left:25%;}100%{top:-50%;left:0%;}}
-@keyframes aurora-3{0%{bottom:0;left:0;}40%{bottom:100%;left:75%;}65%{bottom:40%;left:50%;}100%{bottom:0;left:0;}}
-@keyframes aurora-4{0%{bottom:-50%;right:0;}50%{bottom:0%;right:40%;}90%{bottom:50%;right:25%;}100%{bottom:-50%;right:0;}}
-@keyframes aurora-border{
-  0%{border-radius:37% 29% 27% 27% / 28% 25% 41% 37%;}
-  25%{border-radius:47% 29% 39% 49% / 61% 19% 66% 26%;}
-  50%{border-radius:57% 23% 47% 72% / 63% 17% 66% 33%;}
-  75%{border-radius:28% 49% 29% 100% / 93% 20% 64% 25%;}
-  100%{border-radius:37% 29% 27% 27% / 28% 25% 41% 37%;}
-}
 
-/* Stage */
+/* Stage (make it clickable) */
 .rcg-stage{
   width:var(--ring-size); height:var(--ring-size);
   perspective:1200px; touch-action:pan-y; justify-self:center;
+  position:relative; display:flex; align-items:center; justify-content:center;
 }
+
+/* Side nav buttons */
+.rcg-nav{
+  position:absolute; z-index:40; top:50%; transform: translateY(-50%);
+  width:44px; height:44px; border-radius:50%;
+  border:1px solid rgba(255,255,255,.18);
+  background: rgba(0,0,0,.25);
+  color:var(--ink); font-size:28px; line-height:1; display:grid; place-items:center;
+  cursor:pointer; backdrop-filter: blur(6px);
+  transition: transform .15s ease, background .15s ease, box-shadow .15s ease;
+}
+.rcg-nav:hover{ transform: translateY(-50%) scale(1.05); background: rgba(255,255,255,.12); box-shadow:0 10px 30px rgba(0,0,0,.35); }
+.rcg-nav--left{ left:-18px; }
+.rcg-nav--right{ right:-18px; }
+
 .rcg-ring{
   position:relative; width:100%; height:100%;
   transform-style:preserve-3d;
@@ -265,16 +332,23 @@ we will use your images for our other projects.`,
   backface-visibility:hidden; -webkit-backface-visibility:hidden;
 }
 
-/* Card placement (outer) */
+/* Card (button) */
 .rcg-card{
   position:absolute; top:50%; left:50%;
   width:var(--card-w); height:var(--card-h);
   transform-style:preserve-3d;
   translate:-50% -50%;
   will-change:transform;
+  padding:0; border:0; background:none; cursor:pointer;
+  pointer-events:auto;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
 }
 
-/* Card visuals (inner) */
+/* Visuals should not steal clicks */
+.rcg-inner, .rcg-inner *{ pointer-events:none; }
+
+/* Card visuals */
 .rcg-inner{
   position:absolute; inset:0;
   border-radius:18px; overflow:hidden;
@@ -288,7 +362,6 @@ we will use your images for our other projects.`,
   filter: brightness(1) saturate(1.05);
   box-shadow:0 26px 64px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.08);
 }
-
 .rcg-inner img{
   position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
   filter:saturate(1.05) contrast(1.05);
@@ -296,43 +369,58 @@ we will use your images for our other projects.`,
   backface-visibility:hidden; -webkit-backface-visibility:hidden;
 }
 .rcg-inner .label{
-  width:100%; padding:10px 12px; font-weight:600; letter-spacing:.3px;
-  background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.0));
-  color:var(--ink); text-shadow: 0 1px 0 rgba(0,0,0,.5);
+  width:100%; padding:10px 12px; font-weight:700; letter-spacing:.3px;
+  background: linear-gradient(360deg, rgba(0,0,0,.0), rgba(0,0,0,.35));
+  color:var(--ink); text-shadow: 0 1px 0 rgba(0,0,0,.6);
 }
 
-/* Controls */
-.rcg-controls{
-  width:100%; max-width:720px;
-  display:grid; gap:12px; justify-items:center; text-align:center; justify-self:center;
+/* Overlay */
+.rcg-overlay{
+  position:fixed; inset:0; z-index:60;
+  background: rgba(0,0,0,.65);
+  display:flex; align-items:center; justify-content:center;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  backdrop-filter: blur(6px);
 }
-.rcg-cta{ display:flex; gap:12px; align-items:center; justify-content:center; }
-.rcg-btn{
-  padding:12px 18px; border:0; border-radius:12px; cursor:pointer;
-  background: linear-gradient(180deg, #1f344f, #0e1d33);
-  color:var(--ink); font-weight:700; letter-spacing:.3px;
-  box-shadow: 0 10px 24px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.08);
-  transition: transform .15s ease, box-shadow .15s ease, opacity .2s ease;
+.rcg-overlay__panel{
+  width:min(1100px, 100%);
+  border-radius:18px; overflow:hidden;
+  border:1px solid rgba(255,255,255,.12);
+  background: rgba(9,14,22,.92);
+  box-shadow: 0 40px 120px rgba(0,0,0,.6);
+  display:grid; grid-template-rows:auto 1fr auto;
 }
-.rcg-btn:hover{ transform: translateY(-1px); box-shadow: 0 16px 30px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.12); }
-.rcg-btn[disabled]{ opacity:.45; cursor:not-allowed; filter:grayscale(.2); box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
-.rcg-consent{ display:flex; gap:10px; align-items:flex-start; color:var(--muted); font-size:14px; line-height:1.3; max-width:780px; }
-.rcg-consent input{ transform: translateY(2px); width:18px; height:18px; }
-.rcg-hint{ font-size:12px; color:var(--muted); }
+.rcg-overlay__head{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:14px 16px; border-bottom:1px solid rgba(255,255,255,.08);
+  background:linear-gradient(360deg, rgba(255,255,255,.05), rgba(255,255,255,0));
+}
+.rcg-overlay__title{ font-weight:800; letter-spacing:.2px; color:var(--ink); font-size: clamp(16px, 2.4vw, 22px); }
+.rcg-overlay__close{ border:0; background:transparent; color:var(--ink); opacity:.8; cursor:pointer; font-size:18px; }
 
-/* Camera panel */
-.rcg-camera{
-  width:min(720px, 100%); border-radius:16px; overflow:hidden;
-  border:1px solid rgba(255,255,255,.08);
-  background: rgba(255,255,255,.04);
-  display:none;
+.rcg-overlay__media{ position:relative; min-height: 40vh; display:grid; place-items:center; background:#000; }
+.rcg-overlay__video{ width:100%; height:auto; max-height:70vh; display:block; }
+
+.rcg-overlay__actions{
+  display:flex; flex-wrap:wrap; gap:10px; justify-content:flex-end;
+  padding:12px 14px; border-top:1px solid rgba(255,255,255,.08);
+  background:linear-gradient(0deg, rgba(255,255,255,.05), rgba(255,255,255,0));
 }
-.rcg-camera header{
-  padding:10px 14px; display:flex; justify-content:space-between; align-items:center;
-  background: rgba(0,0,0,.25); border-bottom:1px solid rgba(255,255,255,.06);
+
+.rcg-btn {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink);
+  backdrop-filter: blur(8px);
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  border-radius: 14px;
+  padding: 10px 20px;
+  transition: all 0.3s ease;
+  box-shadow: 0 0 15px rgba(255,255,255,0.08);
 }
-.rcg-camera header button{ background:transparent; border:0; color:var(--ink); font-size:14px; cursor:pointer; opacity:.8; }
-.rcg-camera video{ width:100%; height:auto; display:block; background:#000; }
+.rcg-btn:hover { background: rgba(255, 255, 255, 0.15); transform: translateY(-2px) scale(1.02); box-shadow: 0 0 20px rgba(255,255,255,0.15); }
+.rcg-btn:active { transform: translateY(0) scale(0.98); background: rgba(255, 255, 255, 0.12); }
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce){
@@ -342,8 +430,6 @@ we will use your images for our other projects.`,
 /* Responsive */
 @media (max-width: 520px){
   :root{ --ring-size: 340px; --card-w: 150px; --card-h: 200px; --z-depth: 300px; }
+  .rcg-overlay__video{ max-height: 52vh; }
 }
-      `}</style>
-    </main>
-  );
-}
+`;

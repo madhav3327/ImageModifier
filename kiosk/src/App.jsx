@@ -1,23 +1,31 @@
 // App.jsx
 import React, { useEffect, useMemo, useState, Suspense, lazy } from "react";
 import LandingPainter from "./components/LandingPainter";
+import StartBurst from "./components/StartBurst";
+import DemoExplainer from "./components/DemoExplainer";
+import StartFX from "./components/StartFX";
+
 // Lazy-load heavier screens
 const RotatingCardsIntro = lazy(() => import("./components/RotatingCardsIntro"));
 const KioskApp = lazy(() => import("./KioskApp"));
 
-// Optional: imports for images are unchanged
-import p1 from "./assets/paint1.jpg";
-import p2 from "./assets/paint2.jpg";
-import p3 from "./assets/paint3.jpg";
-import p4 from "./assets/paint4.jpg";
-import p5 from "./assets/paint5.jpg";
-import p6 from "./assets/paint6.jpg";
+// Assets (thumbnails for the cards)
+import p1 from "./assets/IMG_7720.JPG";
+import p2 from "./assets/IMG_7721.JPG";
+import p3 from "./assets/IMG_7722.JPG";
+import p4 from "./assets/IMG_7723.JPG";
+import p5 from "./assets/IMG_7724.JPG";
+import p6 from "./assets/IMG_7725.JPG";
 
 export default function App() {
-  useSafeVh(); // sets --app-svh to fix mobile 100vh issues
-  const [screen, setScreen] = useState("landing"); // "landing" -> "intro" -> "kiosk"
-  const isPortrait = useIsPortrait();
-  const isTouch = useIsTouch();
+  useSafeVh();
+
+  // Flow: "landing" -> "startFX" -> "demo" -> "intro" -> "kiosk"
+  const [screen, setScreen] = useState("landing");
+
+  // Keep the style the user chose from the intro
+  // { index:number, name:string, action: "portrait" | "storyline" }
+  const [selectedStyle, setSelectedStyle] = useState(null);
 
   const images = useMemo(() => [p1, p2, p3, p4, p5, p6], []);
   const message = `Hi everyone—these days we all have cameras to capture every moment.
@@ -34,37 +42,69 @@ Today let’s recreate those paintings with AI.`;
         overflow-hidden
       "
       style={{
-        // iOS/Android safe areas
         paddingTop: "env(safe-area-inset-top)",
         paddingBottom: "env(safe-area-inset-bottom)",
         paddingLeft: "env(safe-area-inset-left)",
         paddingRight: "env(safe-area-inset-right)",
       }}
     >
-      {/* Global responsive container:
-          - small: tighter insets
-          - md+: roomier "kiosk" look
-      */}
-      <div className="absolute inset-2 sm:inset-4 md:inset-6 rounded-2xl overflow-hidden">
-        {/* Orientation hint for phones (optional, shows only on kiosk & intro) */}
-        {(screen === "intro" || screen === "kiosk") && isTouch && isPortrait && (
-          <OrientationHint />
+      <div className="relative min-h-[var(--app-svh,100vh)] sm:m-4 md:m-6 rounded-2xl overflow-auto">
+        {/* Landing → Start FX → Demo */}
+        {screen === "landing" && (
+          <LandingPainter
+            onStart={() => setScreen("startFX")}
+            backgroundVideoSrc="Screensaver2error.mp4"
+            backgroundPoster="/videos/inkwaves-poster.jpg"
+            backgroundDim={0.4}
+          />
+        )}
+
+        {screen === "startFX" && <StartFX onDone={() => setScreen("demo")} />}
+        {screen === "startFX" && <StartBurst />}
+
+        {screen === "demo" && (
+          <DemoExplainer
+            onClose={() => setScreen("intro")}
+            onRepeat={() => setScreen("demo")}
+          />
         )}
 
         <Suspense fallback={<BootSplash />}>
-          {screen === "landing" && (
-            <LandingPainter onStart={() => setScreen("intro")} />
-          )}
-
           {screen === "intro" && (
             <RotatingCardsIntro
               images={images}
               message={message}
-              onGo={() => setScreen("kiosk")}
+              videoFor={(i) => {
+                // Ensure these files are available under /public/artistVideos/*
+                const map = {
+                  0: "/artistVideos/Picasso.mp4",
+                  1: "/artistVideos/VanGogh.mp4",
+                  2: "/artistVideos/Raja.mp4",
+                  3: "/artistVideos/Frida.mp4",
+                  4: "/artistVideos/Claude.mp4",
+                  5: "/artistVideos/Leonardo.mp4",
+                };
+                return map[i];
+              }}
+              onStoryline={({ index, name }) => {
+                setSelectedStyle({ index, name, action: "storyline" });
+                setScreen("kiosk");
+              }}
+              onPortrait={({ index, name }) => {
+                setSelectedStyle({ index, name, action: "portrait" });
+                setScreen("kiosk");
+              }}
             />
           )}
 
-          {screen === "kiosk" && <KioskApp />}
+          {screen === "kiosk" && (
+            <KioskApp
+              initialStyle={selectedStyle}
+              // key forces a remount when user picks a new style/action from intro
+              key={`${selectedStyle?.index ?? "none"}-${selectedStyle?.action ?? "none"}`}
+              onBack={()=>setScreen("intro")}
+            />
+          )}
         </Suspense>
       </div>
     </div>
@@ -83,7 +123,6 @@ function useSafeVh() {
     set();
     window.addEventListener("resize", set);
     window.addEventListener("orientationchange", set);
-    // Some Android browsers fire resize late after URL bar hides
     const t = setTimeout(set, 300);
     return () => {
       clearTimeout(t);
@@ -92,33 +131,6 @@ function useSafeVh() {
     };
   }, []);
 }
-
-function useIsPortrait() {
-  const [portrait, setPortrait] = useState(
-    typeof window !== "undefined" ? window.innerHeight >= window.innerWidth : false
-  );
-  useEffect(() => {
-    const onResize = () =>
-      setPortrait(window.innerHeight >= window.innerWidth);
-    window.addEventListener("resize", onResize);
-    window.addEventListener("orientationchange", onResize);
-    return () => {
-      window.removeEventListener("resize", onResize);
-      window.removeEventListener("orientationchange", onResize);
-    };
-  }, []);
-  return portrait;
-}
-
-function useIsTouch() {
-  const [touch, setTouch] = useState(false);
-  useEffect(() => {
-    setTouch(("ontouchstart" in window) || navigator.maxTouchPoints > 0);
-  }, []);
-  return touch;
-}
-
-/* ------------------ UI bits ------------------ */
 
 function BootSplash() {
   return (
@@ -129,16 +141,14 @@ function BootSplash() {
     </div>
   );
 }
-
-function OrientationHint() {
+function HomeButton({ onHome }) {
   return (
-    <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-50">
-      <div className="pointer-events-auto max-w-[90%] sm:max-w-md rounded-2xl border border-white/15 bg-black/60 p-4 sm:p-5 text-center backdrop-blur">
-        <div className="text-base sm:text-lg font-semibold mb-1">Rotate for best view</div>
-        <p className="text-xs sm:text-sm text-slate-300">
-          For the gallery and camera, landscape gives a better experience.
-        </p>
-      </div>
-    </div>
+    <button
+      onClick={onHome}
+      className="fixed top-3 right-3 z-50 flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-xl border border-white/20 backdrop-blur-md shadow-md transition"
+      title="Go to Home"
+    >
+      🏠 <span className="hidden sm:inline">Home</span>
+    </button>
   );
 }

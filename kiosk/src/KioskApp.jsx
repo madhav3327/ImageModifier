@@ -27,20 +27,8 @@ function CountdownOverlay({ value }) {
   );
 }
 
-// Example artists
+// Artists list
 const ARTISTS = [
-  {
-    key: "vangogh",
-    name: "Vincent van Gogh",
-    prompt:
-      "in the style of Vincent van Gogh: bold impasto brush strokes, swirling skies, vibrant cobalt blue and cadmium yellow, post-Impressionist lighting",
-  },
-  {
-    key: "monet",
-    name: "Claude Monet",
-    prompt:
-      "in the style of Claude Monet: soft impressionist brushwork, broken color, luminous pastel palette, shimmering light reflections",
-  },
   {
     key: "picasso",
     name: "Pablo Picasso",
@@ -48,10 +36,16 @@ const ARTISTS = [
       "in the style of Pablo Picasso: cubist abstraction, fractured planes, bold geometric composition, experimental color blocking",
   },
   {
-    key: "davinci",
-    name: "Leonardo da Vinci",
+    key: "vangogh",
+    name: "Vincent van Gogh",
     prompt:
-      "in the style of Leonardo da Vinci: sfumato, subtle gradations, renaissance lighting, detailed anatomical proportions",
+      "in the style of Vincent van Gogh: bold impasto brush strokes, swirling skies, vibrant cobalt blue and cadmium yellow, post-Impressionist lighting",
+  },
+  {
+    key: "raja",
+    name: "Raja Ravi Varma",
+    prompt:
+      "in the style of Raja Ravi Varma: classical Indian portraiture, rich color palettes, detailed drapery, expressive realism",
   },
   {
     key: "frida",
@@ -59,9 +53,32 @@ const ARTISTS = [
     prompt:
       "in the style of Frida Kahlo: surreal symbolism, vibrant Mexican folk palette, floral motifs, bold portrait framing",
   },
+  {
+    key: "claude",
+    name: "Claude Monet",
+    prompt:
+      "in the style of Claude Monet: soft impressionist brushwork, broken color, luminous pastel palette, shimmering light reflections",
+  },
+  {
+    key: "leonardo",
+    name: "Leonardo da Vinci",
+    prompt:
+      "in the style of Leonardo da Vinci: sfumato, subtle gradations, renaissance lighting, detailed anatomical proportions",
+  },
 ];
-
-export default function KioskApp() {
+function BackButton({ onBack }) {
+  return (
+    <button
+      onClick={onBack}
+      className="fixed top-4 left-4 z-50 text-white text-3xl sm:text-4xl font-light transition-transform hover:scale-110"
+      title="Back"
+      aria-label="Go Back"
+    >
+      ←
+    </button>
+  );
+}
+export default function KioskApp({ initialStyle, onBack }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
@@ -77,11 +94,36 @@ export default function KioskApp() {
   const [rendering, setRendering] = useState(false);
   const [countdown, setCountdown] = useState(0);
 
-  const [prompt, setPrompt] = useState(""); // <-- free text stays
+  const [prompt, setPrompt] = useState("");
   const [artistOpen, setArtistOpen] = useState(false);
   const [selectedArtist, setSelectedArtist] = useState(ARTISTS[0]);
+  const [mode, setMode] = useState("portrait"); // portrait | storyline
 
-  // attach stream & play
+  // ✅ Preselect artist + mode passed from intro
+  useEffect(() => {
+    if (!initialStyle) return;
+    const byIndex =
+      Number.isInteger(initialStyle.index) && ARTISTS[initialStyle.index]
+        ? ARTISTS[initialStyle.index]
+        : null;
+
+    const byName =
+      ARTISTS.find(
+        (a) =>
+          a.name.toLowerCase() === String(initialStyle.name || "").toLowerCase()
+      ) ||
+      ARTISTS.find((a) =>
+        String(initialStyle.name || "")
+          .toLowerCase()
+          .startsWith(a.name.toLowerCase().slice(0, 5))
+      );
+
+    const chosen = byIndex || byName || ARTISTS[0];
+    setSelectedArtist(chosen);
+    setMode(initialStyle.action === "storyline" ? "storyline" : "portrait");
+  }, [initialStyle]);
+
+  // Camera stream management
   useEffect(() => {
     if (!stream || !videoRef.current) return;
     const video = videoRef.current;
@@ -109,7 +151,6 @@ export default function KioskApp() {
     start();
   }, [stream]);
 
-  // gesture unlock
   useEffect(() => {
     const handler = async () => {
       if (needsGestureRef.current && videoRef.current) {
@@ -192,13 +233,9 @@ export default function KioskApp() {
     setResultUrl(newUrl);
   };
 
-  // Build final prompt = artist style + user free text
-  const builtPrompt = [
-    selectedArtist?.prompt?.trim(),
-    prompt.trim(),
-  ]
+  const builtPrompt = [selectedArtist?.prompt?.trim(), prompt.trim()]
     .filter(Boolean)
-    .join(", "); // simple join; adjust if you want different formatting
+    .join(", ");
 
   const handleGenerate = async () => {
     const trimmed = (builtPrompt || "").trim();
@@ -213,6 +250,7 @@ export default function KioskApp() {
       const form = new FormData();
       form.append("image_file", imgBlob, "capture.png");
       form.append("prompt", trimmed);
+      form.append("mode", mode);
 
       const response = await fetch(`${BACKEND_URL}/api/edit`, {
         method: "POST",
@@ -243,6 +281,7 @@ export default function KioskApp() {
       const form = new FormData();
       form.append("image_file", imgBlob, "refine.png");
       form.append("prompt", trimmed);
+      form.append("mode", mode);
 
       const response = await fetch(`${BACKEND_URL}/api/edit`, {
         method: "POST",
@@ -271,7 +310,6 @@ export default function KioskApp() {
     });
   };
 
-  // Display content
   const renderContent = () => {
     if (rendering) {
       return (
@@ -305,11 +343,28 @@ export default function KioskApp() {
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-950 via-slate-900 to-black text-slate-100">
       <header className="sticky top-0 z-10 backdrop-blur bg-slate-900/50 border-b border-white/10">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
-          <Camera className="w-6 h-6" />
-          <h1 className="text-lg font-semibold tracking-tight">Comic Generator</h1>
-        </div>
-      </header>
+  <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4">
+    {/* Inline arrow — aligned neatly */}
+    <button
+      onClick={onBack}
+      className="text-white text-2xl sm:text-3xl font-light hover:scale-110 transition-transform"
+      title="Back"
+      aria-label="Go Back"
+    >
+      ←
+    </button>
+
+    {/* Camera icon */}
+    <Camera className="w-6 h-6 text-white/90" />
+
+    {/* Title */}
+    <h1 className="text-lg font-semibold tracking-tight text-white">
+      {mode === "storyline" ? "Storyline Generator" : "Portrait Generator"}
+    </h1>
+  </div>
+</header>
+      
+      
 
       <main className="max-w-6xl w-full mx-auto px-4 pb-16 pt-6 flex flex-col items-center gap-6">
         <TitleDisplay />
@@ -317,8 +372,9 @@ export default function KioskApp() {
         <div className="grid w-full max-w-4xl gap-4 md:grid-cols-[1fr,360px]">
           {/* Display Column */}
           <div className="w-full rounded-2xl border border-white/10 bg-slate-900/50 overflow-hidden shadow-xl">
-            {/* Artist selector (replaces old header) */}
-            <div className="p-3 border-b border-white/10">
+            {/* Artist + Mode selector */}
+            <div className="p-3 border-b border-white/10 flex items-center justify-between gap-3">
+              {/* Artist Dropdown */}
               <div className="relative inline-block">
                 <button
                   type="button"
@@ -333,7 +389,6 @@ export default function KioskApp() {
                   <ChevronDown className="w-4 h-4 opacity-80" />
                 </button>
 
-                {/* Dropdown list */}
                 <AnimatePresence>
                   {artistOpen && (
                     <motion.ul
@@ -365,13 +420,42 @@ export default function KioskApp() {
                   )}
                 </AnimatePresence>
               </div>
+
+              {/* Animated Mode Toggle */}
+              <div className="relative w-40 h-10 rounded-xl bg-white/10 border border-white/10 flex items-center justify-between cursor-pointer overflow-hidden">
+                <motion.div
+                  layout
+                  className="absolute top-0 bottom-0 rounded-xl bg-indigo-500/70"
+                  style={{
+                    left: mode === "portrait" ? "0%" : "50%",
+                    width: "50%",
+                  }}
+                  transition={{ type: "spring", stiffness: 200, damping: 20 }}
+                />
+                <button
+                  onClick={() => setMode("portrait")}
+                  className={`relative z-10 flex-1 h-full flex items-center justify-center text-sm font-medium transition-colors ${
+                    mode === "portrait" ? "text-white" : "text-slate-300"
+                  }`}
+                >
+                  Portrait
+                </button>
+                <button
+                  onClick={() => setMode("storyline")}
+                  className={`relative z-10 flex-1 h-full flex items-center justify-center text-sm font-medium transition-colors ${
+                    mode === "storyline" ? "text-white" : "text-slate-300"
+                  }`}
+                >
+                  Storyline
+                </button>
+              </div>
             </div>
 
-            {/* Display area */}
+            {/* Display Area */}
             <div className="relative aspect-[12/16] bg-black flex items-center justify-center">
               {renderContent()}
 
-              {/* Artist tag on RIGHT side */}
+              {/* Artist tag */}
               {selectedArtist && (
                 <div className="absolute right-3 top-3 z-10">
                   <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur border border-white/15 text-xs font-medium">
@@ -387,26 +471,36 @@ export default function KioskApp() {
             </div>
           </div>
 
-          {/* Controls Column (free text kept) */}
+          {/* Controls Column */}
           <div className="flex flex-col gap-3">
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe your comic/edit style… (artist style is added automatically)"
-              className="w-full h-36 rounded-xl bg-slate-900/70 border border-white/10 p-3 outline-none"
-            />
+            {/* Show text box only for storyline mode */}
+            <AnimatePresence mode="wait">
+              {mode === "storyline" && (
+                <motion.textarea
+                  key="storyline-box"
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="Describe your storyline… (artist style added automatically)"
+                  className="w-full h-36 rounded-xl bg-slate-900/70 border border-white/10 p-3 outline-none"
+                />
+              )}
+            </AnimatePresence>
 
             <div className="grid grid-cols-2 gap-3">
               <button
                 onClick={openCamera}
-                disabled={hasCamera}
+                disabled={!!stream}
                 className="rounded-xl px-4 py-3 bg-white/10 border border-white/10 hover:bg-white/15 disabled:opacity-50"
               >
                 Open Camera
               </button>
               <button
                 onClick={onClickCapture}
-                disabled={!hasCamera}
+                disabled={!stream}
                 className="rounded-xl px-4 py-3 bg-white/10 border border-white/10 hover:bg-white/15 disabled:opacity-50"
               >
                 Capture
@@ -440,14 +534,6 @@ export default function KioskApp() {
             >
               New Capture
             </button>
-
-            {/* Small helper showing the final prompt actually sent */}
-            <div className="text-xs text-white/60 mt-1 px-1">
-              {/* <div className="font-semibold mb-1">Final Prompt (artist + your text):</div> */}
-              {/* <div className="rounded-lg border border-white/10 bg-slate-900/50 p-2 break-words">
-                {builtPrompt || "— select an artist and/or add text —"}
-              </div> */}
-            </div>
           </div>
         </div>
       </main>

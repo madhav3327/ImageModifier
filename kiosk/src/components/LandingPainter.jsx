@@ -1,21 +1,34 @@
 // LandingPainter.jsx
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 /**
- * LandingPainter (responsive)
- * - Uses 100svh and iOS safe-area env() so content isn't clipped
- * - Responsive frame insets (xs → lg)
- * - Button scales by breakpoint and sits above safe-area
- * - DPR and font sizes recompute on resize/orientation
- * - Respects prefers-reduced-motion
+ * LandingPainter (responsive + video background)
+ *
+ * Props:
+ *  - onStart: () => void
+ *  - phrase?: string                               (default: "Welcome\nto\nArtistic\n AI Storyline")
+ *  - backgroundVideoSrc?: string                   (e.g., "/videos/inkwaves.mp4")
+ *  - backgroundPoster?: string                     (optional poster while buffering)
+ *  - backgroundDim?: number                        (0..1 video darkening overlay, default 0.35)
  */
 export default function LandingPainter({
   onStart,
   phrase = "Welcome\nto\nArtistic\n AI Storyline",
+  backgroundVideoSrc,
+  backgroundPoster,
+  backgroundDim = 0.35,
 }) {
+  const [videoError, setVideoError] = useState(false);
+  const [videoPlaying, setVideoPlaying] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
+
+  // ✅ Consent gate
+  const [consented, setConsented] = useState(false);
+
   const canvasRef = useRef(null);
   const rafRef = useRef(0);
   const stopRef = useRef(false);
+  const videoRef = useRef(null);
 
   // ---- quick knobs (tuneable) ----
   const PAINT_SPEED = 1.6;       // ↑ faster; try 1.2–2.2
@@ -41,6 +54,36 @@ export default function LandingPainter({
     document.head.appendChild(link);
     return () => { try { document.head.removeChild(link); } catch {} };
   }, []);
+
+  // --- prefers-reduced-motion gate for video bg ---
+  const prefersReducedMotion = (() => {
+    try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; }
+    catch { return false; }
+  })();
+  const showVideoBg = !!backgroundVideoSrc && !prefersReducedMotion;
+
+  // Try to autoplay the background video (mobile needs muted+playsInline)
+  useEffect(() => {
+    if (!showVideoBg || !videoRef.current) return;
+    const v = videoRef.current;
+    const onCanPlay = () => setVideoReady(true);
+    v.addEventListener("canplay", onCanPlay, { once: true });
+
+    const tryPlay = async () => {
+      try { await v.play(); } catch {}
+    };
+    const t = setTimeout(tryPlay, 50);
+
+    // Pause when tab hidden (battery friendly)
+    const vis = () => { if (document.hidden) v.pause(); else tryPlay(); };
+    document.addEventListener("visibilitychange", vis);
+
+    return () => {
+      clearTimeout(t);
+      v.removeEventListener("canplay", onCanPlay);
+      document.removeEventListener("visibilitychange", vis);
+    };
+  }, [showVideoBg]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -93,7 +136,6 @@ export default function LandingPainter({
 
     // --- Helpers ---
     function getDPR() {
-      // Cap DPR harder on small screens to save battery/GPU
       const base = (typeof window !== "undefined" && window.devicePixelRatio) ? window.devicePixelRatio : 1;
       const w = typeof window !== "undefined" ? window.innerWidth : 1024;
       const cap = w < 480 ? 1.75 : 2;
@@ -179,7 +221,7 @@ export default function LandingPainter({
       maskCtx.textBaseline = "alphabetic";
       maskCtx.setTransform(1,0,-0.06,1,0,0); // slight italic slant
 
-      // Three-line explicit phrase ("Welcome\nto\nArtistic AI Storyline")
+      // Four-line explicit phrase ("Welcome\nto\nArtistic\n AI Storyline")
       lines = phrase.split("\n");
 
       // Vertical centering
@@ -318,7 +360,7 @@ export default function LandingPainter({
       fxCtx.moveTo(x + (Math.random()-0.5)*6, y + (Math.random()-0.5)*6);
       fxCtx.lineTo(x + (Math.random()-0.5)*4, y + len);
       fxCtx.stroke();
-      fxCtx.fillStyle = rgba(color, 0.55);
+      fxCtx.fillStyle = rgba(color, .55);
       fxCtx.beginPath(); fxCtx.arc(x, y + len, 1.5 + Math.random()*2.5, 0, Math.PI*2); fxCtx.fill();
     }
 
@@ -388,6 +430,7 @@ export default function LandingPainter({
 
     // --- Brush sprite ---
     function drawBrush() {
+      const ctx = canvas.getContext("2d");
       ctx.save();
       ctx.translate(brush.x, brush.y);
       ctx.rotate(brush.angle);
@@ -435,6 +478,7 @@ export default function LandingPainter({
       for (let s = 0; s < STEPS_PER_FRAME; s++) stepBrush(16 / STEPS_PER_FRAME);
 
       // Transparent canvas: show app background
+      const ctx = canvas.getContext("2d");
       ctx.setTransform(1,0,0,1,0,0);
       ctx.clearRect(0,0,W,H);
 
@@ -463,7 +507,6 @@ export default function LandingPainter({
       const enoughTime = (now - startedAt) > MIN_PAINT_TIME_MS;
       if (cov >= COVERAGE_TARGET && enoughTime) {
         fontIdx = (fontIdx + 1) % FONTS.length;
-        // keep current color index; multicolor continues
         paintCtx.clearRect(0,0,W,H);
         fxCtx.clearRect(0,0,W,H);
         layoutText();
@@ -476,7 +519,6 @@ export default function LandingPainter({
     // --- init & resize handling ---
     let rafResize = 0;
     const onResize = async () => {
-      // rAF throttle to avoid resize storms on mobile chrome/ios
       if (rafResize) cancelAnimationFrame(rafResize);
       rafResize = requestAnimationFrame(async () => {
         cancelAnimationFrame(rafRef.current);
@@ -506,8 +548,7 @@ export default function LandingPainter({
 
   return (
     <div
-      className="relative w-full min-h-[100svh] bg-gradient-to-b from-slate-950 via-slate-900 to-black text-slate-100"
-      // Respect iOS safe areas so nothing is hidden behind bars/notches
+      className="relative w-full min-h:[100svh] min-h-[100svh] text-slate-100 isolate"
       style={{
         paddingTop: "env(safe-area-inset-top)",
         paddingBottom: "env(safe-area-inset-bottom)",
@@ -515,23 +556,100 @@ export default function LandingPainter({
         paddingRight: "env(safe-area-inset-right)",
       }}
     >
-      {/* Framed area (rounded + border) — responsive insets */}
-      <div className="absolute inset-2 sm:inset-4 md:inset-6 rounded-2xl border border-white/10 bg-black/20 overflow-hidden shadow-xl">
-        <canvas ref={canvasRef} className="absolute inset-0 block w-full h-full" />
+      {/* Background layer */}
+      <div className="absolute inset-0 z-0">
+        {showVideoBg && !videoError ? (
+          <>
+            <video
+              ref={videoRef}
+              className="absolute inset-0 w-full h-full object-cover"
+              src={backgroundVideoSrc}
+              poster={backgroundPoster}
+              muted
+              loop
+              playsInline
+              autoPlay
+              preload="auto"
+              crossOrigin="anonymous"
+              aria-hidden="true"
+              style={{ willChange: "transform", transform: "translateZ(0)" }}
+              onLoadedData={() => setVideoReady(true)}
+              onPlay={() => setVideoPlaying(true)}
+              onError={() => setVideoError(true)}
+            />
+            <div
+              className="absolute inset-0"
+              style={{ background: `rgba(0,0,0,${backgroundDim})` }}
+              aria-hidden="true"
+            />
+          </>
+        ) : (
+          <div
+            className="absolute inset-0 bg-gradient-to-b from-slate-950 via-slate-900 to-black"
+            aria-hidden="true"
+          />
+        )}
+      </div>
+
+      {/* Frame */}
+      <div className="absolute inset-2 sm:inset-4 md:inset-6 z-10 rounded-2xl border border-white/10 bg-transparent overflow-hidden shadow-xl">
         <div
-          className="absolute inset-x-0 flex items-center justify-center"
-          // Lift above the iOS home bar area
+          className="pointer-events-none absolute inset-0"
+          style={{
+            boxShadow:
+              "inset 0 0 0 1px rgba(255,255,255,.03), inset 0 0 120px rgba(0,0,0,.12)",
+          }}
+        />
+
+        <canvas ref={canvasRef} className="absolute inset-0 block w-full h-full" />
+
+        {/* Consent + Start */}
+        <div
+          className="absolute inset-x-0 flex flex-col items-center justify-center gap-4 px-4"
           style={{ bottom: "max(env(safe-area-inset-bottom), 1.25rem)" }}
         >
+          <label className="flex gap-3 items-start text-sm sm:text-base text-slate-200 bg-black/30 px-4 sm:px-5 py-3 rounded-xl border border-white/10 backdrop-blur-sm max-w-2xl">
+            <input
+              type="checkbox"
+              checked={consented}
+              onChange={(e) => setConsented(e.target.checked)}
+              className="mt-0.5 accent-sky-400 w-5 h-5 cursor-pointer"
+            />
+            <span className="leading-snug">
+              I consent to use my photo for artistic transformation in this exhibit.,
+            </span>
+          </label>
+
           <button
-            onClick={onStart}
+            onClick={() => consented && onStart()}
             aria-label="Start"
-            className="px-5 py-3 sm:px-7 sm:py-3.5 md:px-8 md:py-4 rounded-2xl bg-white/10 text-white font-semibold text-base sm:text-lg md:text-xl border border-white/10 backdrop-blur hover:bg-white/15 active:scale-[0.99] transition"
+            disabled={!consented}
+            className={`px-5 py-3 sm:px-7 sm:py-3.5 md:px-8 md:py-4 rounded-2xl text-white font-semibold text-base sm:text-lg md:text-xl border transition
+            ${
+              consented
+                ? "bg-white/10 border-white/20 hover:bg-white/20 active:scale-[0.99]"
+                : "bg-white/5 border-white/10 opacity-60 cursor-not-allowed"
+            }`}
           >
-            Start
+            {consented ? "Start" : "Please provide consent to continue"}
           </button>
         </div>
+
+        {/* (debug strip) */}
+        {showVideoBg && (
+          <div className="absolute left-3 bottom-3 text-[11px] px-2 py-1 rounded bg-black/40 border border-white/10">
+            {/* keep empty or show debug if needed */}
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+/* ---------- helpers ---------- */
+function getDPR() {
+  try { return Math.min(window.devicePixelRatio || 1, 2); } catch { return 1; }
+}
+function matchMediaSafe(q) {
+  try { return window.matchMedia(q).matches; } catch { return false; }
 }
