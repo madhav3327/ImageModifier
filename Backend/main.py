@@ -62,69 +62,89 @@ else:
             allow_headers=["*"],
         )
 @app.post("/api/edit")
-
 async def process_image_with_gemini(
     image_file: UploadFile = File(...),
-    prompt: str = Form(...)
+    prompt: str = Form(...),
+    mode: str = Form("portrait")   # 👈 new field from frontend
 ):
     print("into gemini")
     try:
         image_bytes = await image_file.read()
         pil_image = Image.open(BytesIO(image_bytes))
-        # prompt= "Maintain the subject's face and facial identity. generate a single page comic by generating a story line according to this prompt : " + prompt
-        prompt = f"""
-Generate a visually cohesive, single-page comic strip, divided into 4 distinct, sequential panels with a clear border around the entire page.
 
-**Overall Artistic Direction and Theme:** {prompt}.
+        user_prompt = prompt.strip()
+        mode = mode.strip().lower()
 
-**Main Character Identity:** The main character depicted in every panel must consistently maintain the face and facial identity of the provided reference image (or a detailed description if no image is provided).
+        # ---------- PROMPT SWITCH ----------
+        if mode == "portrait":
+            # 🎨 Portrait Mode Prompt
+            final_prompt = f"""
+Generate a **single, high-quality artistic portrait** based on the provided image.
 
-**Comic Narrative Requirements:**
-- The comic should tell a short, coherent story based on the theme derived from the "Overall Artistic Direction and Theme."
-- Each of the 4 panels must contain a distinct scene.
-- Each panel must have a short, legible text caption or speech bubble embedded directly within the image, which advances the story sequentially from panel 1 to panel 4.
+**Artistic Style:** {user_prompt}"""
 
-**Panel Progression Guidance:**
-- **Panel 1:** Introduce the character in the setting, hinting at the beginning of the story or an initial action.
-- **Panel 2:** Develop the narrative, showing an ongoing action or a new development.
-- **Panel 3:** Illustrate a key moment, challenge, or achievement in the story.
-- **Panel 4:** Conclude the story, showing the outcome, reflection, or resolution.
+# **Guidelines:**
+# - Maintain the subject’s **exact facial structure, proportions, and recognizable identity**.
+# - Focus on **upper body or face only**.
+# - Do **not** add extra limbs, distortions, or unrelated background objects.
+# - Background may be softly artistic or abstract, complementing the chosen art style.
+# - Avoid surreal or abnormal elements; keep it human-realistic.
+# - Use consistent colors, brushwork, and lighting inspired by the mentioned artist style.
 
-**Formatting and Style:**
-- Maintain a consistent artistic style as specified in the "Overall Artistic Direction and Theme" throughout all panels.
-- Ensure all embedded text is clear, readable, and naturally integrated into the comic art.
-- The entire comic should fit on a single page, clearly delineating each panel.
+# **Output Goal:** A single portrait painting that looks like the same person recreated in the artistic style described above.
+# """
+        else:
+            # 📖 Storyline / Comic Mode Prompt
+            final_prompt = f"""
+Generate a visually cohesive, single-page **comic strip** divided into 4 sequential panels, each with a clear border and consistent artistic style.
+
+**Artistic Theme & Style:** {user_prompt}
+
+**Character Consistency:**
+- The main character must have the same **face, proportions, and identity** as the provided reference image across all panels.
+- Avoid any deformation, extra limbs, or surreal artifacts.
+
+**Comic Narrative:**
+- Tell a short, coherent story derived from the given theme.
+- 4 panels progression:
+  1️⃣ Introduce character and setting.
+  2️⃣ Show an action or event.
+  3️⃣ Illustrate a key emotional or dramatic moment.
+  4️⃣ Conclude with a meaningful ending.
+- Include short, readable **speech bubbles or captions** that advance the story.
+
+**Formatting:**
+- Maintain consistent art style, lighting, and palette.
+- Each panel should be visually distinct but cohesive.
+- The whole comic should fit on a single page, clearly divided into 4 panels.
+
+**Output Goal:** A complete 4-panel comic in {user_prompt} style preserving the character’s identity.
 """
+        # ------------------------------------
 
-        contents = [prompt, pil_image]
-        print("**********************",prompt)
+        contents = [final_prompt, pil_image]
+        print("******** FINAL PROMPT MODE:", mode)
+        print("******** FINAL PROMPT:\n", final_prompt)
 
-        # Use the client to access the models service
         response = client.models.generate_content(
-            model="gemini-2.5-flash-image-preview", 
+            model="gemini-2.5-flash-image-preview",
             contents=contents,
         )
-        print("after gemini")
 
-
-        result_image_data = None
+        # Extract and return image
         for part in response.candidates[0].content.parts:
             if part.inline_data is not None:
                 pil_image = Image.open(BytesIO(part.inline_data.data))
-                
-                # Create an in-memory buffer (BytesIO)
                 img_byte_arr = BytesIO()
                 pil_image.save(img_byte_arr, format="PNG")
                 img_byte_arr.seek(0)
-
                 return Response(content=img_byte_arr.getvalue(), media_type="image/png")
-        
+
         raise HTTPException(status_code=500, detail="No image found in Gemini API response.")
 
     except Exception as e:
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
-       
-
 # ---------------- WebSockets: Pairing & Relay ----------------
 import asyncio
 import uuid
