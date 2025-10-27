@@ -10,12 +10,12 @@ const RotatingCardsIntro = lazy(() => import("./components/RotatingCardsIntro"))
 const KioskApp = lazy(() => import("./KioskApp"));
 
 // Assets (thumbnails for the cards)
-import p1 from "./assets/IMG_7720.JPG";
-import p2 from "./assets/IMG_7721.JPG";
-import p3 from "./assets/IMG_7722.JPG";
-import p4 from "./assets/IMG_7723.JPG";
-import p5 from "./assets/IMG_7724.JPG";
-import p6 from "./assets/IMG_7725.JPG";
+import p1 from "./assets/Picasso.JPG";
+import p2 from "./assets/VanGogh.JPG";
+import p3 from "./assets/RajaRaviVarma.JPG";
+import p4 from "./assets/FridaKahlo.JPG";
+import p5 from "./assets/ClaudeMonet.JPG";
+import p6 from "./assets/LeonardoDaVinci.JPG";
 
 export default function App() {
   useSafeVh();
@@ -103,6 +103,7 @@ Today let’s recreate those paintings with AI.`;
               // key forces a remount when user picks a new style/action from intro
               key={`${selectedStyle?.index ?? "none"}-${selectedStyle?.action ?? "none"}`}
               onBack={()=>setScreen("intro")}
+              onHome={() => { setSelectedStyle(null); setScreen("landing"); }} 
             />
           )}
         </Suspense>
@@ -141,14 +142,14 @@ function BootSplash() {
     </div>
   );
 }
-function HomeButton({ onHome }) {
-  return (
-    <button
-      onClick={onHome}
-      className="fixed top-3 right-3 z-50 flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-xl border border-white/20 backdrop-blur-md shadow-md transition"
-      title="Go to Home"
-    >
-      🏠 <span className="hidden sm:inline">Home</span>
-    </button>
-  );
-}
+// function HomeButton({ onHome }) {
+//   return (
+//     <button
+//       onClick={onHome}
+//       className="fixed top-3 right-3 z-50 flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-xl border border-white/20 backdrop-blur-md shadow-md transition"
+//       title="Go to Home"
+//     >
+//       🏠 <span className="hidden sm:inline">Home</span>
+//     </button>
+//   );
+// }

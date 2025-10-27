@@ -8,6 +8,20 @@ import ProcessingDisplay from "./components/ProcessingDisplay";
 const RAW_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 const BACKEND_URL = RAW_BASE.replace(/\/+$/, "");
 
+// --- Home Button (inline; remove if you import it from App.jsx) ---
+function HomeButton({ onHome }) {
+  return (
+    <button
+      onClick={onHome}
+      className="fixed top-3 right-3 z-50 flex items-center gap-2 bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-xl border border-white/20 backdrop-blur-md shadow-md transition"
+      title="Go to Home"
+      aria-label="Go to Home"
+    >
+      🏠 <span className="hidden sm:inline">Home</span>
+    </button>
+  );
+}
+
 // --- Countdown Overlay ---
 function CountdownOverlay({ value }) {
   if (!value || value <= 0) return null;
@@ -29,43 +43,14 @@ function CountdownOverlay({ value }) {
 
 // Artists list
 const ARTISTS = [
-  {
-    key: "picasso",
-    name: "Pablo Picasso",
-    prompt:
-      "in the style of Pablo Picasso: cubist abstraction, fractured planes, bold geometric composition, experimental color blocking",
-  },
-  {
-    key: "vangogh",
-    name: "Vincent van Gogh",
-    prompt:
-      "in the style of Vincent van Gogh: bold impasto brush strokes, swirling skies, vibrant cobalt blue and cadmium yellow, post-Impressionist lighting",
-  },
-  {
-    key: "raja",
-    name: "Raja Ravi Varma",
-    prompt:
-      "in the style of Raja Ravi Varma: classical Indian portraiture, rich color palettes, detailed drapery, expressive realism",
-  },
-  {
-    key: "frida",
-    name: "Frida Kahlo",
-    prompt:
-      "in the style of Frida Kahlo: surreal symbolism, vibrant Mexican folk palette, floral motifs, bold portrait framing",
-  },
-  {
-    key: "claude",
-    name: "Claude Monet",
-    prompt:
-      "in the style of Claude Monet: soft impressionist brushwork, broken color, luminous pastel palette, shimmering light reflections",
-  },
-  {
-    key: "leonardo",
-    name: "Leonardo da Vinci",
-    prompt:
-      "in the style of Leonardo da Vinci: sfumato, subtle gradations, renaissance lighting, detailed anatomical proportions",
-  },
+  { key: "picasso",  name: "Pablo Picasso",  prompt: "in the style of Pablo Picasso: cubist abstraction, fractured planes, bold geometric composition, experimental color blocking" },
+  { key: "vangogh",  name: "Vincent van Gogh",  prompt: "in the style of Vincent van Gogh: bold impasto brush strokes, swirling skies, vibrant cobalt blue and cadmium yellow, post-Impressionist lighting" },
+  { key: "raja",     name: "Raja Ravi Varma",  prompt: "in the style of Raja Ravi Varma: classical Indian portraiture, rich color palettes, detailed drapery, expressive realism" },
+  { key: "frida",    name: "Frida Kahlo",  prompt: "in the style of Frida Kahlo: surreal symbolism, vibrant Mexican folk palette, floral motifs, bold portrait framing" },
+  { key: "claude",   name: "Claude Monet",  prompt: "in the style of Claude Monet: soft impressionist brushwork, broken color, luminous pastel palette, shimmering light reflections" },
+  { key: "leonardo", name: "Leonardo da Vinci",  prompt: "in the style of Leonardo da Vinci: sfumato, subtle gradations, renaissance lighting, detailed anatomical proportions" },
 ];
+
 function BackButton({ onBack }) {
   return (
     <button
@@ -78,7 +63,8 @@ function BackButton({ onBack }) {
     </button>
   );
 }
-export default function KioskApp({ initialStyle, onBack }) {
+
+export default function KioskApp({ initialStyle, onBack, onHome }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
@@ -342,29 +328,29 @@ export default function KioskApp({ initialStyle, onBack }) {
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-slate-950 via-slate-900 to-black text-slate-100">
+      {/* Top bar */}
       <header className="sticky top-0 z-10 backdrop-blur bg-slate-900/50 border-b border-white/10">
-  <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4">
-    {/* Inline arrow — aligned neatly */}
-    <button
-      onClick={onBack}
-      className="text-white text-2xl sm:text-3xl font-light hover:scale-110 transition-transform"
-      title="Back"
-      aria-label="Go Back"
-    >
-      ←
-    </button>
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4">
+          {/* Inline back arrow */}
+          <button
+            onClick={onBack}
+            className="text-white text-2xl sm:text-3xl font-light hover:scale-110 transition-transform"
+            title="Back"
+            aria-label="Go Back"
+          >
+            ←
+          </button>
 
-    {/* Camera icon */}
-    <Camera className="w-6 h-6 text-white/90" />
+          <Camera className="w-6 h-6 text-white/90" />
 
-    {/* Title */}
-    <h1 className="text-lg font-semibold tracking-tight text-white">
-      {mode === "storyline" ? "Storyline Generator" : "Portrait Generator"}
-    </h1>
-  </div>
-</header>
-      
-      
+          <h1 className="text-lg font-semibold tracking-tight text-white">
+            {mode === "storyline" ? "Storyline Generator" : "Portrait Generator"}
+          </h1>
+        </div>
+
+        {/* Top-right Home (fixed so it always stays visible) */}
+        <HomeButton onHome={onHome} />
+      </header>
 
       <main className="max-w-6xl w-full mx-auto px-4 pb-16 pt-6 flex flex-col items-center gap-6">
         <TitleDisplay />
@@ -383,9 +369,7 @@ export default function KioskApp({ initialStyle, onBack }) {
                   aria-haspopup="listbox"
                   aria-expanded={artistOpen}
                 >
-                  <span className="font-medium">
-                    {selectedArtist ? selectedArtist.name : "Choose Artist"}
-                  </span>
+                  <span className="font-medium">Choose Artist</span>
                   <ChevronDown className="w-4 h-4 opacity-80" />
                 </button>
 
@@ -426,10 +410,7 @@ export default function KioskApp({ initialStyle, onBack }) {
                 <motion.div
                   layout
                   className="absolute top-0 bottom-0 rounded-xl bg-indigo-500/70"
-                  style={{
-                    left: mode === "portrait" ? "0%" : "50%",
-                    width: "50%",
-                  }}
+                  style={{ left: mode === "portrait" ? "0%" : "50%", width: "50%" }}
                   transition={{ type: "spring", stiffness: 200, damping: 20 }}
                 />
                 <button

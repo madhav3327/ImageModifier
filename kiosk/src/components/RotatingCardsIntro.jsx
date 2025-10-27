@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 export default function RotatingCardsIntro({
   images = [],
-  intervalMs = 200000,
+  intervalMs = 10000,
   videoFor,
   onStoryline,
   onPortrait,
@@ -11,8 +11,8 @@ export default function RotatingCardsIntro({
   const ringRef = useRef(null);
 
   const [activeIdx, setActiveIdx] = useState(null); // overlay index (null = closed)
-  const [frontIdx, setFrontIdx] = useState(0);      // for cosmetic rotation only
-  const [spinning, setSpinning] = useState(false);  // debounce just for smooth spin
+  const [frontIdx, setFrontIdx] = useState(0);      // cosmetic rotation index
+  const [spinning, setSpinning] = useState(false);
   const overlayOpen = activeIdx !== null;
 
   const cards = useMemo(() => {
@@ -30,7 +30,7 @@ export default function RotatingCardsIntro({
     const items = Array.from(ring.children);
     items.forEach((el, i) => {
       el.style.transform = `rotateY(${i * step}deg) translateZ(var(--z-depth))`;
-      el.style.pointerEvents = "auto"; // every card is always clickable
+      el.style.pointerEvents = "auto";
     });
   }, [step, N, cards.length]);
 
@@ -87,7 +87,6 @@ export default function RotatingCardsIntro({
   const focusCard = (idx) => {
     const ring = ringRef.current;
     if (!ring) return;
-
     setSpinning(true);
     setFrontIdx(idx);
     ring.style.transition = "transform 600ms cubic-bezier(.22,.61,.36,1)";
@@ -95,13 +94,14 @@ export default function RotatingCardsIntro({
       ring.style.transform =
         `translateZ(-100px) rotateX(-8deg) rotateY(${-idx * step}deg)`;
     });
-
     setTimeout(() => {
       ring.style.transition = "";
       setSpinning(false);
       setActiveIdx(idx);
     }, 620);
   };
+
+  const playFront = () => setActiveIdx(frontIdx);
 
   const getStyleName = (idx) => {
     const c = cards[idx];
@@ -156,9 +156,6 @@ export default function RotatingCardsIntro({
       </header>
 
       <section className="rcg-stage" aria-label="rotating gallery">
-        {/* Left/Right navigation */}
-        <button className="rcg-nav rcg-nav--left" onClick={goPrev} aria-label="Previous">‹</button>
-
         <div className="rcg-ring" ref={ringRef}>
           {cards.map((c, i) => (
             <button
@@ -181,7 +178,34 @@ export default function RotatingCardsIntro({
           ))}
         </div>
 
-        <button className="rcg-nav rcg-nav--right" onClick={goNext} aria-label="Next">›</button>
+        {/* Controls centered below the ring */}
+        <div className="rcg-controls" aria-label="carousel controls">
+          <button
+            className="rcg-ctrl rcg-ctrl--icon"
+            onClick={goPrev}
+            aria-label="Previous"
+            disabled={spinning}
+          >
+            ‹
+          </button>
+          <button
+            className="rcg-ctrl rcg-ctrl--play"
+            onClick={playFront}
+            aria-label={`Play ${getStyleName(frontIdx)} video`}
+            disabled={spinning}
+            title={getStyleName(frontIdx)}
+          >
+            ▶ Play
+          </button>
+          <button
+            className="rcg-ctrl rcg-ctrl--icon"
+            onClick={goNext}
+            aria-label="Next"
+            disabled={spinning}
+          >
+            ›
+          </button>
+        </div>
       </section>
 
       {overlayOpen && (
@@ -207,21 +231,25 @@ export default function RotatingCardsIntro({
             </header>
 
             <div className="rcg-overlay__media">
-              {resolvedVideo ? (
-                <video
-                  src={resolvedVideo}
-                  className="rcg-overlay__video"
-                  autoPlay
-                  controls
-                  playsInline
-                />
-              ) : (
-                <div className="rcg-overlay__placeholder">
-                  <div className="rcg-overlay__pulse" />
-                  <span>No video mapped for this style.</span>
-                </div>
-              )}
-            </div>
+  {resolvedVideo ? (
+    <>
+      <video
+        src={resolvedVideo}
+        className="rcg-overlay__video"
+        autoPlay
+        
+        playsInline
+        loop
+      />
+      {/* <div className="rcg-video-caption">{getStyleName(activeIdx)}</div> */}
+    </>
+  ) : (
+    <div className="rcg-overlay__placeholder">
+      <div className="rcg-overlay__pulse" />
+      <span>No video mapped for this style.</span>
+    </div>
+  )}
+</div>
 
             <div className="rcg-overlay__actions">
               <button className="rcg-btn" onClick={handleStoryline}>Storyline in this style</button>
@@ -259,6 +287,21 @@ function humanize(s) {
 /* ---------------- CSS ---------------- */
 
 const CSS = `
+
+/* On-video artist name badge */
+.rcg-video-caption{
+  position:absolute;
+  left:12px; bottom:12px;
+  padding:8px 12px;
+  border-radius:10px;
+  font-weight:800; letter-spacing:.2px;
+  color:var(--ink);
+  background:rgba(0,0,0,.45);
+  border:1px solid rgba(255,255,255,.14);
+  backdrop-filter: blur(6px);
+  pointer-events:none;
+  user-select:none;
+}
 :root{
   --bg: #0b0f17;
   --ink: #e8f0ff;
@@ -304,27 +347,33 @@ const CSS = `
 .aurora__item:nth-of-type(3){ background:#33ff8c; left:0; bottom:0; animation: aurora-border 6s ease-in-out infinite, aurora-3 8s ease-in-out infinite alternate; }
 .aurora__item:nth-of-type(4){ background:#e54cff; right:0; bottom:-50%; animation: aurora-border 6s ease-in-out infinite, aurora-4 24s ease-in-out infinite alternate; }
 
-/* Stage (make it clickable) */
+/* Stage */
 .rcg-stage{
   width:var(--ring-size); height:var(--ring-size);
   perspective:1200px; touch-action:pan-y; justify-self:center;
   position:relative; display:flex; align-items:center; justify-content:center;
 }
 
-/* Side nav buttons */
-.rcg-nav{
-  position:absolute; z-index:40; top:50%; transform: translateY(-50%);
-  width:44px; height:44px; border-radius:50%;
-  border:1px solid rgba(255,255,255,.18);
-  background: rgba(0,0,0,.25);
-  color:var(--ink); font-size:28px; line-height:1; display:grid; place-items:center;
-  cursor:pointer; backdrop-filter: blur(6px);
-  transition: transform .15s ease, background .15s ease, box-shadow .15s ease;
+/* Controls centered under the ring */
+.rcg-controls{
+  position:absolute; bottom:-52px; left:50%; transform:translateX(-50%);
+  display:flex; gap:10px; align-items:center; z-index:35;
 }
-.rcg-nav:hover{ transform: translateY(-50%) scale(1.05); background: rgba(255,255,255,.12); box-shadow:0 10px 30px rgba(0,0,0,.35); }
-.rcg-nav--left{ left:-18px; }
-.rcg-nav--right{ right:-18px; }
+.rcg-ctrl{
+  border:1px solid rgba(255,255,255,.18);
+  background:rgba(0,0,0,.28);
+  color:var(--ink);
+  padding:10px 16px; border-radius:12px;
+  font-weight:700; letter-spacing:.2px;
+  cursor:pointer; backdrop-filter:blur(6px);
+  transition: transform .15s ease, background .15s ease, box-shadow .15s ease, opacity .15s ease;
+}
+.rcg-ctrl:hover{ transform:translateY(-2px); background: rgba(255,255,255,.12); box-shadow:0 10px 30px rgba(0,0,0,.35); }
+.rcg-ctrl:disabled{ opacity:.55; cursor:not-allowed; }
+.rcg-ctrl--icon{ width:44px; height:44px; padding:0; border-radius:50%; font-size:24px; line-height:1; display:grid; place-items:center; }
+.rcg-ctrl--play{ padding:10px 18px; }
 
+/* Ring */
 .rcg-ring{
   position:relative; width:100%; height:100%;
   transform-style:preserve-3d;
@@ -345,7 +394,7 @@ const CSS = `
   -webkit-transform: translateZ(0);
 }
 
-/* Visuals should not steal clicks */
+/* Make only card visuals ignore pointer events (so the button gets clicks) */
 .rcg-inner, .rcg-inner *{ pointer-events:none; }
 
 /* Card visuals */
@@ -431,5 +480,8 @@ const CSS = `
 @media (max-width: 520px){
   :root{ --ring-size: 340px; --card-w: 150px; --card-h: 200px; --z-depth: 300px; }
   .rcg-overlay__video{ max-height: 52vh; }
+  .rcg-controls{ bottom:-58px; }
+  .rcg-ctrl--icon{ width:40px; height:40px; font-size:22px; }
+  .rcg-ctrl--play{ padding:8px 14px; font-size:14px; }
 }
 `;
